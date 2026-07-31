@@ -67,6 +67,9 @@ npm install          # 테스트용 jsdom만 설치
 npm test             # 전체 (약 1~2분)
 ```
 
+> **Node 22.22.2 이상이 필요하다.** jsdom 30이 그 아래에서는 설치는 되지만(경고만) 실행 중 죽는다.
+> CI도 이 때문에 한 번 실패했다. `package.json`의 `engines`와 워크플로의 `node-version`을 같이 맞춘다.
+
 | 명령 | 내용 |
 |---|---|
 | `npm test` | 알고리즘 700조합 + 기능 + UI/UX 전체 |

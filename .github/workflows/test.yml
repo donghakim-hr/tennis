@@ -16,7 +16,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24   # jsdom 30은 Node 22.22+/24.15+ 를 요구한다
 
       - name: 의존성 설치 (테스트용 jsdom)
         run: npm install --no-audit --no-fund
