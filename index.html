@@ -16,13 +16,15 @@
     --bg:#eef1f5;
     --card:#ffffff;
     --ink:#0e1a26;
-    --muted:#6d7c8a;
+    --muted:#5a6875;      /* 흰 카드 위 5.7:1 · 배경 위 5.0:1 (WCAG AA) */
     --hair:#dfe4ea;
     --ball:#d9ec4b;
     --win:#1a7f4b;
     --shadow:0 1px 2px rgba(14,26,38,.06),0 8px 24px rgba(14,26,38,.06);
   }
   *{box-sizing:border-box}
+  /* 저자 규칙(.setup{display:grid} 등)이 UA의 [hidden]{display:none}을 이기므로 명시적으로 막는다 */
+  [hidden]{display:none!important}
   html,body{margin:0;padding:0}
   body{
     background:var(--bg);
@@ -55,14 +57,18 @@
   h1{
     font-size:15px;margin:0;font-weight:800;letter-spacing:-.02em;flex:1 1 auto;
   }
-  .prog{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;font-weight:600}
-  .tabs{max-width:760px;margin:0 auto;padding:10px 14px 0;display:flex;gap:18px}
+  .prog{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;font-weight:600}
+  .tabs{max-width:760px;margin:0 auto;padding:4px 14px 0;display:flex;gap:8px}
   .tab{
-    appearance:none;border:0;background:none;padding:0 0 9px;cursor:pointer;
-    font:inherit;font-size:13.5px;font-weight:700;color:var(--muted);
+    appearance:none;border:0;background:none;padding:11px 10px 9px;cursor:pointer;
+    font:inherit;font-size:14px;font-weight:700;color:var(--muted);min-height:44px;
     border-bottom:2px solid transparent;letter-spacing:-.02em;white-space:nowrap;
+    border-radius:8px 8px 0 0;
   }
-  .tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--court)}
+  .tab[aria-selected="true"]{
+    color:var(--court);border-bottom-color:var(--court);border-bottom-width:3px;
+    background:rgba(47,107,179,.08);
+  }
 
   /* ---------- shared bits ---------- */
   .eyebrow{
@@ -74,26 +80,27 @@
     padding:16px;box-shadow:var(--shadow);
   }
   /* ---------- 접이식 설정 카드 ---------- */
-  .fold .foldhead{display:flex;align-items:center;gap:10px}
+  .fold .foldhead{display:flex;align-items:center;gap:10px;min-height:44px;cursor:pointer;user-select:none}
   .fold .foldhead .eyebrow{margin:0}
   .fold .foldbody{margin-top:8px}
-  .fold .foldsum,.fold .chev{display:none}
-  .fold.can .foldhead{cursor:pointer;user-select:none}
-  .fold.can .foldsum{
-    display:block;margin-left:auto;font-size:13px;font-weight:700;color:var(--ink);
+  .fold .foldsum{
+    margin-left:auto;font-size:13px;font-weight:700;color:var(--ink);
     letter-spacing:-.01em;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   }
-  .fold.can .chev{
-    display:block;flex:0 0 auto;width:8px;height:8px;margin-right:2px;
-    border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);
+  .fold .chev{
+    flex:0 0 auto;width:10px;height:10px;margin-right:2px;
+    border-right:2.5px solid var(--muted);border-bottom:2.5px solid var(--muted);
     transform:rotate(45deg) translate(-2px,-2px);transition:transform .15s;
   }
-  .fold.can.closed .chev{transform:rotate(-45deg) translate(-1px,-1px)}
+  .fold.closed .chev{transform:rotate(-45deg) translate(-1px,-1px)}
   .fold.closed .foldbody{display:none}
+  /* 접힌 카드는 밀도를 높여 스크롤이 늘지 않게 한다 */
+  .fold.closed{padding:8px 16px}
+  .fold.closed .foldhead{margin:0 -16px;padding:0 16px}
   .foldall{
     appearance:none;border:1px solid var(--hair);background:var(--card);color:var(--muted);
-    font:inherit;font-size:12.5px;font-weight:700;padding:9px;border-radius:10px;cursor:pointer;
-    width:100%;letter-spacing:-.01em;
+    font:inherit;font-size:13px;font-weight:700;padding:13px;border-radius:10px;cursor:pointer;
+    width:100%;letter-spacing:-.01em;min-height:44px;
   }
   .btn{
     appearance:none;font:inherit;font-weight:700;cursor:pointer;
@@ -102,7 +109,8 @@
   }
   .btn:active{transform:translateY(1px)}
   .btn.primary{background:var(--court);border-color:var(--court);color:#fff;width:100%;padding:15px;font-size:16px}
-  .btn.ghost{background:none;border-color:transparent;color:var(--muted);padding:10px 8px;font-size:13px}
+  .btn.ghost{background:var(--card);border-color:var(--hair);color:var(--muted);padding:12px;font-size:13px}
+  .btn.danger{color:#8f2f2f;border-color:#f3c9c9;background:#fff}
   .btn:focus-visible,input:focus-visible,.tab:focus-visible{outline:2px solid var(--court);outline-offset:2px}
   .row{display:flex;gap:8px;flex-wrap:wrap}
 
@@ -132,7 +140,7 @@
   .chip:disabled[aria-pressed="true"]{background:var(--bg);border-color:var(--hair);color:var(--muted)}
   .names{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}
   @media (max-width:420px){.names{grid-template-columns:1fr}}
-  .name-field{display:flex;align-items:center;gap:8px;border:1px solid var(--hair);border-radius:10px;padding:0 10px;background:var(--bg)}
+  .name-field{display:flex;align-items:center;gap:6px;border:1px solid var(--hair);border-radius:10px;padding:0 8px;background:var(--bg)}
   .name-no{font-size:11px;font-weight:800;color:var(--muted);font-variant-numeric:tabular-nums;width:2ch}
   .name-field input{
     border:0;background:none;font:inherit;font-weight:600;padding:11px 0;width:100%;color:var(--ink);
@@ -143,9 +151,19 @@
 
   /* ---------- schedule ---------- */
   .round{margin-top:22px}
-  .round-head{display:flex;align-items:baseline;gap:8px;margin-bottom:10px}
+  /* 입력 중에도 몇 라운드인지 · 그 라운드가 다 찼는지 보이게 고정 */
+  .round-head{
+    position:sticky;top:var(--hh,84px);z-index:10;
+    display:flex;align-items:center;gap:8px;
+    margin:0 -14px 10px;padding:8px 14px;
+    background:var(--bg);border-bottom:1px solid var(--hair);
+  }
   .round-no{font-size:20px;font-weight:800;letter-spacing:-.03em}
-  .round-tag{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.02em}
+  .round-tag{
+    font-size:13px;font-weight:800;color:var(--muted);letter-spacing:.02em;
+    margin-left:auto;font-variant-numeric:tabular-nums;
+  }
+  .round-tag.full{color:var(--win)}
   .rest{
     margin-top:10px;font-size:12.5px;color:var(--muted);
     display:flex;gap:6px;align-items:center;flex-wrap:wrap;
@@ -162,7 +180,7 @@
   .court.done{background:var(--court-dark)}
   .court-label{
     position:absolute;top:7px;left:9px;z-index:2;
-    font-size:10px;font-weight:800;letter-spacing:.14em;color:rgba(255,255,255,.72);
+    font-size:11px;font-weight:800;letter-spacing:.14em;color:rgba(255,255,255,.95);
   }
   .side{
     display:flex;align-items:center;gap:10px;
@@ -174,19 +192,25 @@
     color:#fff;font-weight:800;font-size:17px;letter-spacing:-.02em;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   }
-  .players .sub{font-size:10.5px;color:rgba(255,255,255,.6);font-weight:700;letter-spacing:.1em;margin-top:2px}
+  .players .sub{font-size:11.5px;color:rgba(255,255,255,.88);font-weight:700;letter-spacing:.1em;margin-top:2px}
   .score{
     width:64px;height:56px;flex:0 0 auto;
-    border:1px solid rgba(255,255,255,.35);border-radius:8px;
-    background:rgba(255,255,255,.1);
+    border:2px solid rgba(255,255,255,.6);border-radius:8px;
+    background:rgba(255,255,255,.14);
     color:#fff;font:inherit;font-size:28px;font-weight:800;
     text-align:center;font-variant-numeric:tabular-nums;
     -moz-appearance:textfield;
   }
   .score::-webkit-outer-spin-button,.score::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
-  .score::placeholder{color:rgba(255,255,255,.4);font-weight:600}
-  .score:focus{outline:none;border-color:var(--ball);background:rgba(255,255,255,.18)}
+  .score::placeholder{color:rgba(255,255,255,.8);font-weight:700}
+  .score:focus{
+    outline:none;border-color:var(--ball);background:rgba(255,255,255,.22);
+    box-shadow:0 0 0 3px rgba(217,236,75,.55);
+  }
   .score.win{border-color:var(--ball);background:var(--ball);color:#16240a}
+  /* 공유 링크로 열어본 결과 — 눌러도 수정되지 않음을 형태로 알린다 */
+  .score[readonly]{background:transparent;border-style:dashed;border-color:rgba(255,255,255,.5)}
+  .score[readonly]:focus{border-color:rgba(255,255,255,.6);background:transparent;box-shadow:none}
   .net{
     height:0;border-top:2px solid var(--line);
     margin:0 -3px;position:relative;
@@ -198,10 +222,15 @@
 
   /* ---------- ranking ---------- */
   .scroller{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -16px;padding:0 16px}
+  /* 실제로 넘칠 때만 안내를 띄운다 (JS가 .canscroll을 붙인다) */
+  .scroller.canscroll::before{
+    content:"← 좌우로 밀어서 나머지 열 보기";display:block;
+    font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:6px;
+  }
   table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
   th,td{padding:11px 6px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--hair)}
   th{
-    font-size:10px;font-weight:800;letter-spacing:.1em;color:var(--muted);
+    font-size:11.5px;font-weight:800;letter-spacing:.08em;color:var(--muted);
     text-transform:uppercase;padding-top:0;
   }
   th:first-child,td:first-child{text-align:center;width:34px;padding-left:0}
@@ -233,15 +262,19 @@
   }
   .dateinput:focus{outline:none;border-color:var(--court)}
   .datechip{
-    font-size:11.5px;font-weight:800;color:var(--court);
+    font-size:12px;font-weight:800;color:var(--court);
     background:rgba(47,107,179,.1);border-radius:999px;padding:4px 9px;
     white-space:nowrap;
   }
+  .datechip.vo{color:#8f2f2f;background:#fdecec}   /* 열람용(공유 링크) 표시 */
 
   /* ---------- summary ---------- */
   .sum{font-size:13px}
   .sum th,.sum td{text-align:left;padding:10px 8px;vertical-align:middle}
-  .sum th:first-child,.sum td:first-child{width:34px;text-align:center;padding-left:0}
+  .sum th:first-child,.sum td:first-child{
+    width:34px;text-align:center;padding-left:0;
+    position:sticky;left:0;background:var(--card);z-index:1;box-shadow:1px 0 0 var(--hair);
+  }
   .sum td:first-child{font-weight:800;color:var(--muted);font-variant-numeric:tabular-nums}
   .vs{white-space:nowrap}
   .vs .t{font-weight:700;letter-spacing:-.01em}
@@ -258,6 +291,7 @@
   .mx th:first-child,.mx td:first-child{
     text-align:left;width:auto;padding-left:0;font-weight:700;
     position:sticky;left:0;background:var(--card);z-index:1;padding-right:10px;
+    box-shadow:1px 0 0 var(--hair);
   }
   .cell{
     display:inline-flex;align-items:center;justify-content:center;
@@ -284,10 +318,10 @@
   .hist-m b{color:var(--ink);font-weight:700}
   .hist-del{
     appearance:none;border:0;background:none;cursor:pointer;flex:0 0 auto;
-    color:var(--muted);font:inherit;font-size:12px;font-weight:700;padding:8px;
+    color:#8f2f2f;font:inherit;font-size:12.5px;font-weight:700;
+    min-width:44px;min-height:44px;padding:12px 10px;
   }
-  .hist-del:hover{color:#b03b3b}
-  footer{margin-top:26px;display:flex;gap:6px;justify-content:center;flex-wrap:wrap}
+  footer{margin-top:26px;display:flex;gap:10px;justify-content:flex-start;flex-wrap:wrap}
   /* ---------- intro (종목 선택) ---------- */
   .intro{margin-top:40px}
   .intro h2{font-size:22px;font-weight:800;letter-spacing:-.03em;margin:0 0 6px}
@@ -314,8 +348,8 @@
   /* ---------- gender toggle ---------- */
   .gbtn{
     appearance:none;border:1px solid var(--hair);background:var(--card);cursor:pointer;
-    font:inherit;font-size:11.5px;font-weight:800;border-radius:7px;
-    padding:5px 0;width:30px;flex:0 0 auto;color:var(--muted);
+    font:inherit;font-size:13px;font-weight:800;border-radius:9px;
+    padding:0;width:44px;min-height:44px;flex:0 0 auto;color:var(--muted);
   }
   .gbtn.m{background:#e8f0fa;border-color:#bcd6ef;color:#1d5b96}
   .gbtn.f{background:#fbe9f0;border-color:#f0c2d4;color:#a83a66}
@@ -323,13 +357,13 @@
   /* ---------- 실력 등급 ---------- */
   .lvbtn{
     appearance:none;border:1px solid var(--hair);background:var(--card);cursor:pointer;
-    font:inherit;font-size:11.5px;font-weight:800;border-radius:7px;
-    padding:5px 0;width:26px;flex:0 0 auto;color:var(--muted);
+    font:inherit;font-size:13px;font-weight:800;border-radius:9px;
+    padding:0;width:44px;min-height:44px;flex:0 0 auto;color:var(--muted);
   }
   .lvbtn.a{background:#eaf5ec;border-color:#c2e0c9;color:#256b39}
   .lvbtn.b{background:var(--bg);border-color:var(--hair);color:var(--muted)}
   .lvbtn.c{background:#fdf1e5;border-color:#f0d6b6;color:#96601f}
-  .lv{font-size:9.5px;font-weight:800;color:var(--muted);vertical-align:super;margin-left:1px}
+  .lv{font-size:11px;font-weight:800;color:var(--muted);vertical-align:super;margin-left:2px}
   /* ---------- 고정 조 ---------- */
   .pairline{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
   .pairchip{
@@ -352,15 +386,15 @@
   .savebar-in{
     max-width:760px;margin:0 auto;display:flex;align-items:center;gap:12px;
   }
-  .savemsg{flex:1 1 auto;min-width:0;font-size:12.5px;color:var(--muted);font-weight:600;letter-spacing:-.01em}
+  .savemsg{flex:1 1 auto;min-width:0;font-size:13.5px;color:var(--muted);font-weight:600;letter-spacing:-.01em}
   .savemsg b{color:var(--ink);font-weight:700}
   .savebar .btn.primary{width:auto;flex:0 0 auto;padding:13px 22px;font-size:15px}
-  .btn.primary:disabled{background:var(--hair);border-color:var(--hair);color:var(--muted);cursor:default}
+  .btn.primary:disabled{background:var(--card);border-color:var(--hair);color:var(--muted);cursor:default}
   .btn.primary.saved{background:var(--win);border-color:var(--win)}
   body.has-savebar .wrap{padding-bottom:120px}
 
   .toast{
-    position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(8px);
+    position:fixed;left:50%;bottom:calc(92px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(8px);
     background:var(--ink);color:#fff;padding:11px 18px;border-radius:999px;
     font-size:13px;font-weight:700;opacity:0;pointer-events:none;transition:.2s;z-index:50;
   }
@@ -373,13 +407,13 @@
     <span class="mark" aria-hidden="true"></span>
     <h1>테니스 복식 매칭</h1>
     <span class="datechip" id="datechip" hidden></span>
-    <span class="prog" id="prog"></span>
+    <span class="prog" id="prog" aria-live="polite"></span>
   </div>
-  <div class="tabs" id="tabs" hidden>
-    <button class="tab" id="tab-sched" aria-selected="true">대진표</button>
-    <button class="tab" id="tab-summary" aria-selected="false">요약</button>
-    <button class="tab" id="tab-rank" aria-selected="false">순위</button>
-    <button class="tab" id="tab-hist" aria-selected="false">기록</button>
+  <div class="tabs" id="tabs" role="tablist" hidden>
+    <button class="tab" id="tab-sched" role="tab" aria-controls="sched" aria-selected="true">대진표</button>
+    <button class="tab" id="tab-summary" role="tab" aria-controls="summary" aria-selected="false">요약</button>
+    <button class="tab" id="tab-rank" role="tab" aria-controls="rank" aria-selected="false">순위</button>
+    <button class="tab" id="tab-hist" role="tab" aria-controls="hist" aria-selected="false">기록</button>
   </div>
 </header>
 
@@ -462,6 +496,7 @@
     <div class="card fold" data-fold="names">
       <div class="foldhead"><p class="eyebrow">참가자 이름</p><span class="foldsum"></span><span class="chev" aria-hidden="true"></span></div>
       <div class="foldbody">
+        <button class="btn" id="load-roster" style="width:100%;margin-bottom:10px" hidden></button>
         <p class="hint">비워두면 참가자 번호로 표시됩니다.</p>
         <div class="names" id="names"></div>
       </div>
@@ -475,24 +510,30 @@
   </section>
 
   <!-- SCHEDULE -->
-  <section id="sched" hidden></section>
+  <section id="sched" role="tabpanel" aria-labelledby="tab-sched" hidden></section>
 
   <!-- SUMMARY -->
-  <section id="summary" hidden></section>
+  <section id="summary" role="tabpanel" aria-labelledby="tab-summary" hidden></section>
 
   <!-- RANK -->
-  <section id="rank" hidden></section>
+  <section id="rank" role="tabpanel" aria-labelledby="tab-rank" hidden></section>
 
   <!-- HISTORY -->
-  <section id="hist" hidden></section>
+  <section id="hist" role="tabpanel" aria-labelledby="tab-hist" hidden></section>
 
   <footer id="foot" hidden>
-    <button class="btn ghost" id="newday">새 경기 시작</button>
-    <button class="btn ghost" id="reshuffle">대진 다시 짜기</button>
-    <button class="btn ghost" id="copy">결과 복사</button>
     <button class="btn ghost" id="share">공유 링크 복사</button>
-    <button class="btn ghost" id="import" hidden>내 기록에 저장</button>
+    <button class="btn ghost" id="copy">결과 복사</button>
+    <button class="btn ghost" id="newday">새 경기 시작</button>
+    <button class="btn ghost danger" id="reshuffle">대진 다시 짜기</button>
   </footer>
+</div>
+
+<div class="savebar" id="setupbar" hidden>
+  <div class="savebar-in">
+    <span class="savemsg" id="setupmsg"></span>
+    <button class="btn primary" id="make2">대진표 만들기</button>
+  </div>
 </div>
 
 <div class="savebar" id="savebar" hidden>
@@ -615,7 +656,19 @@ function save(){
   if (S.schedule && S.date){ DB.sessions[S.date] = snapshot(); DB.current = S.date; }
   Store.set(DB);
 }
+/* 점수는 입력이 멈추면 스스로 저장된다 — 경기 중 '저장' 버튼을 누를 이유를 없앤다 */
+var saveT;
+function autosave(){
+  clearTimeout(saveT);
+  saveT = setTimeout(function(){
+    if (viewOnly || !dirty || !S.schedule) return;
+    S.savedAt = Date.now(); dirty = false;
+    save(); renderSaveBar();
+  }, 700);
+}
+
 var courtTouched = false;   // 사용자가 코트 수를 직접 고르면 자동 보정 중단
+var scrollMem = {};         // 탭별 스크롤 위치 (탭을 왕복해도 보던 코트로 돌아온다)
 function dateKeys(){
   return Object.keys(DB.sessions).sort().reverse();
 }
@@ -643,6 +696,11 @@ function lvIn(sess, i){
 function lvArr(sess){
   var a = []; for (var i=0;i<sess.count;i++) a.push(lvIn(sess, i));
   return a;
+}
+// 등급이 실제로 지정되었는가 (전원 B면 전력 맞추기가 아무 일도 하지 않는다)
+function levelSet(sess){
+  for (var i=0;i<sess.count;i++){ if (lvIn(sess, i) !== 2) return true; }
+  return false;
 }
 // 팀 전력 차이 비용 (levels 없으면 0)
 function balCost(lv, A, B){
@@ -1125,13 +1183,17 @@ function dots(kind){
 
 function renderIntro(){
   var host = $("#intro");
+  var errBox = shareErr
+    ? '<div class="warnbox" style="margin-bottom:16px">공유 링크를 읽을 수 없습니다. 메신저가 긴 주소를 잘랐을 수 있어요 — '
+      + '단톡방에서 링크 전체를 다시 복사해 붙여주세요. 직접 대진을 만들려면 아래에서 종목을 고르세요.</div>'
+    : "";
   var opts = introStep === 1
     ? [{ k:"single", t:"단식", d:"1 대 1 · 코트당 2명" },
        { k:"double", t:"복식", d:"2 대 2 · 코트당 4명" }]
     : [{ k:"same",  t:"동성 복식", d:"성별 구분 없이 팀 구성" },
        { k:"mixed", t:"혼성 복식", d:"모든 팀을 남 1명 · 여 1명으로" }];
 
-  host.innerHTML =
+  host.innerHTML = errBox +
     '<h2>' + (introStep === 1 ? "어떤 경기를 하시나요?" : "복식 방식을 골라주세요") + '</h2>' +
     '<p class="lead">' + (introStep === 1
       ? "종목에 따라 코트 정원과 대진 방식이 달라집니다."
@@ -1187,10 +1249,11 @@ function ensureGenders(){
 }
 
 /* ---------------- 설정 카드 접기 ----------------
-   참가자 이름을 전원 입력하면 설정 카드들이 한 번 자동으로 접히고,
-   이후에는 카드 머리글을 눌러 자유롭게 펼치거나 접을 수 있다. */
+   카드는 언제나 접거나 펼칠 수 있다. 이미 정해진 값(종목·일자·파트너·등급)은 처음부터 접혀 있고,
+   참가자 이름을 전원 입력하면 나머지도 한 번 자동으로 접힌다. */
 var FOLD_KEYS = ["mode","date","count","courts","games","partner","level","names"];
-var foldClosed = {};     // 접혀 있는 카드
+// 첫 화면에서 접어 둘 카드 — 값이 이미 정해져 있어 확인만 필요한 것들
+var foldClosed = { mode:true, date:true, partner:true, level:true };
 var foldAuto   = false;  // 전원 입력에 따른 자동 접기를 이미 했는지
 var foldBound  = false;
 
@@ -1202,10 +1265,12 @@ function allNamesFilled(){
 function foldSummary(key){
   switch (key){
     case "mode":   return modeLabel(S);
-    case "date":   return S.date;
+    case "date":   return fmtDate(S.date);
     case "count":  return S.count + "명";
-    case "courts": return "코트 " + S.courts + "면";
-    case "games":  return "1인당 " + S.games + "경기";
+    case "courts":
+      var rst = S.count - S.courts*perCourt(S.mode);
+      return "코트 " + S.courts + "면 · " + (rst ? rst + "명 휴식" : "전원 출전");
+    case "games":  return "1인당 " + S.games + "경기 · 총 " + roundsFor(cfgNow()) + "라운드";
     case "partner":return S.mixPartner === "fixed" ? "고정 조" : "랜덤";
     case "level":
       if (!S.useLevel) return "사용 안 함";
@@ -1227,9 +1292,8 @@ function bindFold(){
     var key = card.dataset.fold;
     var head = card.querySelector(".foldhead");
     function toggle(){
-      if (!card.classList.contains("can")) return;
       foldClosed[key] = !foldClosed[key];
-      paintFold(true);
+      paintFold();
     }
     head.addEventListener("click", toggle);
     head.addEventListener("keydown", function(e){
@@ -1239,40 +1303,41 @@ function bindFold(){
   $("#fold-all").addEventListener("click", function(){
     var anyOpen = FOLD_KEYS.some(function(k){ return !foldClosed[k]; });
     FOLD_KEYS.forEach(function(k){ foldClosed[k] = anyOpen; });
-    paintFold(true);
+    paintFold();
   });
 }
 
-function paintFold(can){
+function paintFold(){
   Array.prototype.forEach.call(document.querySelectorAll("#setup .fold"), function(card){
     var key = card.dataset.fold;
-    card.classList.toggle("can", can);
-    card.classList.toggle("closed", can && !!foldClosed[key]);
-    card.querySelector(".foldsum").textContent = can ? foldSummary(key) : "";
+    card.classList.toggle("closed", !!foldClosed[key]);
+    card.querySelector(".foldsum").textContent = foldClosed[key] ? foldSummary(key) : "";
     var head = card.querySelector(".foldhead");
-    if (can){
-      head.setAttribute("role","button");
-      head.setAttribute("tabindex","0");
-      head.setAttribute("aria-expanded", foldClosed[key] ? "false" : "true");
-    } else {
-      head.removeAttribute("role"); head.removeAttribute("tabindex"); head.removeAttribute("aria-expanded");
-    }
+    head.setAttribute("role","button");
+    head.setAttribute("tabindex","0");
+    head.setAttribute("aria-expanded", foldClosed[key] ? "false" : "true");
   });
   var fa = $("#fold-all");
-  fa.hidden = !can;
-  if (can) fa.textContent = FOLD_KEYS.some(function(k){ return !foldClosed[k]; }) ? "설정 모두 접기" : "설정 모두 펼치기";
+  fa.hidden = false;
+  fa.textContent = FOLD_KEYS.some(function(k){ return !foldClosed[k]; }) ? "설정 모두 접기" : "설정 모두 펼치기";
 }
 
-// autoClose=true 인 시점(이름 입력 완료 등)에 최초 1회 자동으로 접는다
+// autoClose=true 인 시점(이름 전원 입력 후 칸을 벗어남)에 최초 1회 자동으로 접는다
 function refreshFold(autoClose){
   bindFold();
-  var can = allNamesFilled();
-  if (!can){ foldClosed = {}; foldAuto = false; }
-  else if (autoClose && !foldAuto){
-    foldAuto = true;
-    FOLD_KEYS.forEach(function(k){ foldClosed[k] = true; });
+  if (autoClose && !foldAuto && allNamesFilled()){
+    // 붕괴가 진행 중인 좌표에서 탭이 빗나가지 않도록 다음 틱으로 미루고,
+    // 포커스가 설정 화면 밖으로 나갔을 때만 접는다 (이름 칸 사이 이동에는 반응하지 않음)
+    setTimeout(function(){
+      var ae = d.activeElement;
+      if (ae && ae.closest && ae.closest("#setup")) return;
+      if (foldAuto || !allNamesFilled()) return;
+      foldAuto = true;
+      FOLD_KEYS.forEach(function(k){ foldClosed[k] = true; });
+      paintFold();
+    }, 0);
   }
-  paintFold(can);
+  paintFold();
 }
 
 /* ---------------- setup rendering ---------------- */
@@ -1294,8 +1359,8 @@ function renderSetup(){
   if (!courtTouched) S.courts = maxC;
   if (S.courts > maxC) S.courts = maxC;
   var pc = perCourt(S.mode);
-  $("#court-hint").textContent = "선택 가능 최대 " + maxC + "코트 · 코트 1면에 " + pc + "명"
-    + (mixed ? " (남 2 · 여 2)" : "");
+  $("#court-hint").textContent = "코트 1면에 " + pc + "명" + (mixed ? " (남 2 · 여 2)" : "")
+    + " · 이 인원이면 최대 " + maxC + "코트까지 쓸 수 있습니다.";
 
   var cc = $("#c-chips");
   if (!cc.children.length){
@@ -1312,7 +1377,8 @@ function renderSetup(){
     b.setAttribute("aria-pressed", v === S.courts ? "true" : "false");
   });
   var rest = S.count - S.courts*pc;
-  $("#court-detail").textContent = "코트 " + S.courts + "면 동시 진행 · "
+  $("#court-detail").textContent = (courtTouched ? "" : "자동 선택(최대 " + maxC + "코트) · ")
+    + "코트 " + S.courts + "면 동시 진행 · "
     + (rest ? "매 라운드 " + rest + "명 휴식" : "전원 매 라운드 출전")
     + (fx && !fxBad ? " (고정 조 " + pairsOf(S).length + "조 중 " + (S.courts*2) + "조 출전)" : "");
 
@@ -1351,16 +1417,25 @@ function renderSetup(){
   if (!$("#lv-seg").dataset.bound){
     $("#lv-seg").dataset.bound = "1";
     Array.prototype.forEach.call($("#lv-seg").children, function(b){
-      b.addEventListener("click", function(){ S.useLevel = this.dataset.l === "on"; renderSetup(); save(); });
+      b.addEventListener("click", function(){
+        S.useLevel = this.dataset.l === "on";
+        if (S.useLevel) foldClosed["names"] = false;   // 등급 버튼이 접힘 뒤에 숨지 않게
+        renderSetup(); save();
+      });
     });
   }
   Array.prototype.forEach.call($("#lv-seg").children, function(b){
     b.setAttribute("aria-pressed", (b.dataset.l === "on") === !!S.useLevel ? "true" : "false");
   });
-  $("#lv-hint").innerHTML = S.useLevel
-    ? "이름 칸의 <b>A · B · C</b> 버튼으로 등급을 정하면 양 팀 전력 합이 비슷해지도록 팀을 짭니다. "
-      + "(A 상 · B 중 · C 하, 기본 B) 페어·상대 중복 회피가 우선이고 그다음 전력 균형입니다."
-    : "등급을 쓰지 않으면 실력과 무관하게 중복 회피만 고려합니다.";
+  if (!S.useLevel){
+    $("#lv-hint").innerHTML = "등급을 쓰지 않으면 실력과 무관하게 중복 회피만 고려합니다.";
+  } else if (!levelSet(S)){
+    $("#lv-hint").innerHTML = '<span style="color:#8f2f2f;font-weight:700">아직 전원 B라 전력 맞추기가 적용되지 않습니다.</span>'
+      + " 아래 이름 칸의 <b>A · B · C</b> 버튼을 눌러 등급을 지정하세요. (A 상 · B 중 · C 하)";
+  } else {
+    $("#lv-hint").innerHTML = "양 팀 전력 합이 비슷해지도록 팀을 짭니다. "
+      + "페어·상대 중복 회피가 우선이고 그다음 전력 균형입니다.";
+  }
 
   var chips = $("#r-chips");
   if (!chips.children.length){
@@ -1414,7 +1489,17 @@ function renderSetup(){
       var inp = f.querySelector("input");
       inp.value = S.names[k] || "";
       inp.dataset.k = k;
+      inp.setAttribute("enterkeyhint", k === S.count-1 ? "done" : "next");
+      inp.setAttribute("autocomplete", "off");
+      inp.spellcheck = false;
       inp.addEventListener("input", function(){ S.names[+this.dataset.k] = this.value; save(); refreshFold(false); });
+      // Enter로 다음 이름 칸으로 (16명 입력의 왕복을 줄인다)
+      inp.addEventListener("keydown", function(e){
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        var nx = $("#names").querySelectorAll("input")[+this.dataset.k + 1];
+        if (nx) nx.focus(); else this.blur();
+      });
       // 입력을 마치고 칸을 벗어났을 때(전원 입력 완료 시점) 한 번 자동으로 접는다
       inp.addEventListener("change", function(){ refreshFold(true); });
       inp.addEventListener("blur",   function(){ refreshFold(true); });
@@ -1443,6 +1528,12 @@ function renderSetup(){
       box.appendChild(f);
     }
   }
+  // 상태가 화면 밖에서 바뀐 경우(명단 불러오기 등) 입력 칸을 맞춘다. 입력 중인 칸은 건드리지 않는다
+  Array.prototype.forEach.call(box.querySelectorAll("input"), function(inp){
+    var kk = +inp.dataset.k, v = S.names[kk] || "";
+    if (inp !== d.activeElement && inp.value !== v) inp.value = v;
+  });
+
   var rule;
   if (S.mode === "single"){
     rule = "1라운드 코트 1은 <b>1번 vs 2번</b>으로 고정되고, 나머지는 같은 상대를 두 번 만나지 않도록 배분합니다.";
@@ -1479,9 +1570,27 @@ function renderSetup(){
       var i5 = +b.dataset.k, v = lvIn(S, i5);
       b.textContent = LVL[v];
       b.className = "lvbtn " + LVL[v].toLowerCase();
-      b.setAttribute("aria-label", (i5+1) + "번 실력 등급 (현재 " + LVL[v] + ")");
+      var nx = v === 3 ? 2 : (v === 2 ? 1 : 3);
+      b.setAttribute("aria-label", (i5+1) + "번 실력 등급 " + LVL[v] + ", 누르면 " + LVL[nx]);
     });
   }
+
+  // 지난 경기 명단 불러오기 — 매 회차 이름 16개를 다시 타이핑하지 않도록
+  var lastKey = null, keys = dateKeys();
+  for (var q=0;q<keys.length;q++){ if (keys[q] !== S.date){ lastKey = keys[q]; break; } }
+  var lr = $("#load-roster");
+  lr.hidden = !lastKey;
+  if (lastKey){
+    lr.textContent = fmtDate(lastKey) + " 명단 불러오기 (" + DB.sessions[lastKey].count + "명)";
+    lr.dataset.d = lastKey;
+  }
+
+  // 설정 화면 하단 고정 CTA — 카드 8장 아래까지 스크롤하지 않아도 만들 수 있게
+  var sb = $("#setupmsg"), mk2 = $("#make2");
+  sb.innerHTML = bad
+    ? '<b style="color:#8f2f2f">설정을 확인해 주세요</b>'
+    : "<b>" + S.count + "명</b> · 코트 " + S.courts + "면 · " + loadFor(cfg).rounds + "라운드 · 1인당 " + S.games + "경기";
+  mk2.disabled = !!bad;
 
   refreshFold(false);
 }
@@ -1504,14 +1613,21 @@ function renderSchedule(){
     + (cfg.fixed ? " · 파트너 고정" : "")
     + (cfg.fixed ? "" : (dup ? " · " + dupWord + " " + dup + "회" : " · " + dupWord + " 없음"))
     + " · 최장 연속 " + worst + "경기"
-    + (S.useLevel ? " · 팀 전력 편차 평균 " + balOf(S).toFixed(1) : "");
+    + (S.useLevel && levelSet(S) ? " · 팀 전력 편차 평균 " + balOf(S).toFixed(1) : "");
   host.appendChild(head);
 
   if (viewOnly){
-    var vo = document.createElement("p");
-    vo.className = "hint";
-    vo.style.margin = "6px 0 0";
-    vo.textContent = "공유 링크로 열어본 결과입니다. 점수는 수정할 수 없고 이 기기에 저장되지 않습니다.";
+    var vo = document.createElement("div");
+    vo.className = "warnbox";
+    vo.style.margin = "10px 0 0";
+    vo.innerHTML = "<b>공유받은 결과를 보고 있습니다.</b> 점수는 수정할 수 없고 이 기기에 저장되지 않습니다. "
+      + "이 화면은 링크를 다시 열면 언제든 복원됩니다.";
+    var ib = document.createElement("button");
+    ib.className = "btn";
+    ib.style.cssText = "width:100%;margin-top:10px";
+    ib.textContent = "내 기록에 저장하고 점수 수정하기";
+    ib.addEventListener("click", doImport);   // 카드는 매 렌더마다 새로 만들어 중복 바인딩이 없다
+    vo.appendChild(ib);
     host.appendChild(vo);
   }
 
@@ -1519,12 +1635,15 @@ function renderSchedule(){
     var warn = document.createElement("p");
     warn.className = "hint";
     warn.style.margin = "6px 0 0";
-    warn.style.color = "#b03b3b";
     var b = S.count - S.courts*perCourt(S.mode);
+    if (b > 0) warn.style.color = "#8f2f2f";   // 휴식이 있는데도 4연속이 나오면 진짜 경고
+    var less = { n:S.count, courts:Math.max(1,S.courts-1), games:S.games, type:typeOf(S),
+                 genders:S.genders, fixed:cfg.fixed, pairs:cfg.pairs };
     warn.textContent = (b === 0
-      ? "코트가 모두 차서 휴식 인원이 없습니다."
-      : "라운드당 휴식이 " + b + "명뿐입니다.")
-      + " 4연속 출전을 완전히 없애려면 코트 수를 줄이세요.";
+      ? "코트 " + S.courts + "면이면 전원이 매 라운드 출전합니다(정상). 휴식을 넣으려면"
+      : "라운드당 휴식이 " + b + "명뿐입니다. 4연속을 없애려면")
+      + " 코트를 " + Math.max(1,S.courts-1) + "면으로 줄이세요 — 라운드가 "
+      + S.schedule.length + "→" + roundsFor(less) + "로 늘어납니다.";
     host.appendChild(warn);
   }
 
@@ -1533,7 +1652,11 @@ function renderSchedule(){
     sec.className = "round";
     var h = document.createElement("div");
     h.className = "round-head";
-    h.innerHTML = '<span class="round-no">'+(ri+1)+'라운드</span>';
+    var dn = 0;
+    rd.matches.forEach(function(m){ if (filled(m)) dn++; });
+    h.innerHTML = '<span class="round-no">'+(ri+1)+'라운드</span>'
+      + '<span class="round-tag' + (dn === rd.matches.length ? " full" : "") + '">'
+      + dn + ' / ' + rd.matches.length + '</span>';
     sec.appendChild(h);
 
     rd.matches.forEach(function(m, mi){
@@ -1594,13 +1717,46 @@ $("#sched").addEventListener("input", function(e){
   inputs[0].classList.toggle("win", filled(m) && +m.sa > +m.sb);
   inputs[1].classList.toggle("win", filled(m) && +m.sb > +m.sa);
 
+  // 그 라운드가 다 찼는지 배지를 즉시 갱신 (전체 재렌더 없이)
+  var rd = S.schedule[+el.dataset.r], dn = 0;
+  rd.matches.forEach(function(x){ if (filled(x)) dn++; });
+  var rt = el.closest(".round").querySelector(".round-tag");
+  if (rt){
+    rt.textContent = dn + " / " + rd.matches.length;
+    rt.classList.toggle("full", dn === rd.matches.length);
+  }
+
   dirty = true;
   renderProgress(); renderRank(); renderSaveBar();
+  autosave();
+});
+
+/* 코트 카드 어디를 눌러도 그 팀 점수 칸으로 들어간다 (행의 4/5가 죽은 영역이었다) */
+$("#sched").addEventListener("click", function(e){
+  var t = e.target;
+  if (!t.closest) return;
+  if (t.classList && t.classList.contains("score")){
+    if (viewOnly) toast("공유받은 결과입니다. 점수는 수정할 수 없습니다");
+    return;
+  }
+  if (viewOnly) return;
+  var side = t.closest(".side"); if (!side) return;
+  var inp = side.querySelector(".score"); if (!inp) return;
+  inp.focus();
+  try { inp.select(); } catch(_){}
+});
+
+/* 이미 값이 있는 칸은 전체 선택 — 백스페이스 없이 덮어쓰게 (6에 7을 치면 67이 되던 문제) */
+$("#sched").addEventListener("focusin", function(e){
+  var el = e.target;
+  if (!el.classList || !el.classList.contains("score")) return;
+  try { el.select(); } catch(_){}
 });
 
 /* ---------------- summary rendering (read-only overview) ---------------- */
 function renderSummary(){
   var host = $("#summary");
+  var vo = viewOnly ? '<div class="warnbox" style="margin-top:16px">공유받은 결과를 보고 있습니다. 점수는 수정할 수 없습니다.</div>' : "";
   var courts = S.courts;
   var head = "";
   for (var c=0;c<courts;c++) head += "<th>코트 " + (c+1) + "</th>";
@@ -1650,7 +1806,7 @@ function renderSummary(){
     legend += '<span><i class="dot c' + (lc%4) + '"></i>코트 ' + (lc+1) + '</span>';
   }
 
-  host.innerHTML =
+  host.innerHTML = vo +
     '<p class="eyebrow" style="margin:20px 0 8px">라운드별 대진</p>' +
     '<div class="card"><div class="scroller"><table class="sum"><thead><tr><th>R</th>' + head +
       '</tr></thead><tbody>' + body + '</tbody></table></div></div>' +
@@ -1660,6 +1816,7 @@ function renderSummary(){
       '<div class="legend">' + legend + '<span><i class="dot" style="background:var(--bg);border:1px solid var(--hair)"></i>휴식</span>' +
       '<span>숫자+A/B = 코트번호와 팀</span></div>' +
     '</div>';
+  markScrollers();
 }
 
 /* ---------------- history rendering ---------------- */
@@ -1693,6 +1850,7 @@ function renderHistory(){
   Array.prototype.forEach.call(host.querySelectorAll(".hist-open"), function(b){
     b.addEventListener("click", function(){
       startNewFromView();
+      scrollMem = {};
       hydrate(DB.sessions[this.dataset.d]);
       DB.current = S.date; S.tab = "sched"; render(); save(); window.scrollTo({top:0});
     });
@@ -1710,8 +1868,11 @@ function renderHistory(){
 }
 
 function startNew(){
+  if (!viewOnly && S.schedule && progressOf(S).done > 0
+      && !confirm("입력한 점수는 " + fmtDateFull(S.date) + " 기록에 저장됩니다. 새 경기 설정으로 돌아갈까요?")) return;
   if (dirty) save();
   startNewFromView();
+  scrollMem = {};
   courtTouched = false;
   S.schedule = null; DB.current = null; S.savedAt = null; dirty = false;
   S.date = todayStr(); S.tab = "sched";
@@ -1722,6 +1883,7 @@ function renderRank(){
   var rows = stats();
   var any = rows.some(function(r){ return r.g > 0; });
   host.innerHTML =
+    (viewOnly ? '<div class="warnbox" style="margin-top:16px">공유받은 결과를 보고 있습니다. 점수는 수정할 수 없습니다.</div>' : "") +
     '<div class="sortline" style="margin-top:16px">' +
       '<span class="eyebrow" style="margin:0">정렬</span>' +
       '<div class="seg">' +
@@ -1748,6 +1910,15 @@ function renderRank(){
   Array.prototype.forEach.call(host.querySelectorAll(".seg button"), function(b){
     b.addEventListener("click", function(){ S.sort = this.dataset.s; renderRank(); save(); });
   });
+  markScrollers();
+}
+
+// 실제로 가로로 넘치는 표에만 스크롤 안내를 붙인다 (숨은 탭은 폭이 0이라 건너뛴다)
+function markScrollers(){
+  Array.prototype.forEach.call(d.querySelectorAll(".scroller"), function(sc){
+    if (!sc.clientWidth) return;
+    sc.classList.toggle("canscroll", sc.scrollWidth > sc.clientWidth + 4);
+  });
 }
 
 function renderProgress(){
@@ -1772,11 +1943,11 @@ function renderSaveBar(){
   btn.classList.toggle("saved", !dirty && !!S.savedAt);
 
   if (pr.done === 0){
-    btn.textContent = "결과 저장";
-    msg.textContent = "점수를 입력하면 저장할 수 있습니다";
+    btn.textContent = "지금 저장";
+    msg.textContent = "점수를 입력하면 자동으로 저장됩니다";
   } else if (dirty){
-    btn.textContent = "결과 저장";
-    msg.innerHTML = "<b>" + pr.done + "/" + pr.all + "</b> 경기 입력됨 · 저장하지 않은 변경";
+    btn.textContent = "지금 저장";
+    msg.innerHTML = "<b>" + pr.done + "/" + pr.all + "</b> 경기 · 입력 중 (자동 저장됩니다)";
   } else {
     btn.textContent = "저장됨";
     msg.innerHTML = "<b>" + pr.done + "/" + pr.all + "</b> 경기"
@@ -1803,39 +1974,95 @@ function render(){
   $("#tab-hist").setAttribute("aria-selected", hist);
 
   $("#reshuffle").hidden = viewOnly;
-  $("#import").hidden = !viewOnly || !live;
+  $("#newday").hidden = viewOnly;      // 열람자에게 '새 경기 시작'은 의미가 없다
+
+  var setupOn = !intro && !live && !hist;
+  $("#setupbar").hidden = !setupOn;
 
   var chip = $("#datechip");
   chip.hidden = !live;
-  if (live) chip.textContent = fmtDate(S.date);
+  if (live){
+    chip.textContent = (viewOnly ? "열람용 · " : "") + fmtDate(S.date);
+    chip.className = "datechip" + (viewOnly ? " vo" : "");
+  }
 
   if (intro) renderIntro();
   if (hist) renderHistory();
-  if (live){ renderSchedule(); renderSummary(); renderRank(); renderProgress(); }
+  if (live){
+    renderSchedule();
+    if (S.tab === "summary") renderSummary();
+    if (S.tab === "rank") renderRank();
+    renderProgress();
+  }
   else if (!intro){ renderSetup(); $("#prog").textContent = ""; }
   else { $("#prog").textContent = ""; }
   renderSaveBar();
+  d.body.classList.toggle("has-savebar", setupOn || (!!S.schedule && S.tab === "sched" && !viewOnly));
+  measureHeader();
+  markScrollers();
+}
+
+// 라운드 헤더 sticky 기준점 — 탭 바 유무에 따라 헤더 높이가 달라진다
+function measureHeader(){
+  var h = d.querySelector("header");
+  d.documentElement.style.setProperty("--hh", ((h && h.offsetHeight) || 84) + "px");
+}
+window.addEventListener("resize", measureHeader);
+
+// 탭 이동 시 보던 위치를 기억한다
+function goTab(t){
+  scrollMem[S.tab] = window.pageYOffset || 0;
+  S.tab = t; render();
+  window.scrollTo(0, scrollMem[t] || 0);
+  if (t !== "history") save();
 }
 
 /* ---------------- events ---------------- */
-$("#p-minus").addEventListener("click", function(){ if (S.count>minPlayers(S.mode)){ S.count--; if(S.courts>maxCourts(S.count)) S.courts=maxCourts(S.count); renderSetup(); save(); } });
+$("#p-minus").addEventListener("click", function(){
+  // 코트 상한 보정은 renderSetup이 종목·성별·고정조를 모두 반영해 처리한다
+  if (S.count > minPlayers(S.mode)){ S.count--; if (S.pair === "mixed") ensureGenders(); renderSetup(); save(); }
+});
 $("#p-plus").addEventListener("click",  function(){ if (S.count<16){ S.count++; if(S.pair==="mixed") ensureGenders(); renderSetup(); save(); } });
-$("#tab-sched").addEventListener("click", function(){ S.tab="sched"; render(); save(); });
-$("#tab-summary").addEventListener("click", function(){ S.tab="summary"; render(); save(); });
-$("#tab-rank").addEventListener("click",  function(){ S.tab="rank";  render(); save(); });
-$("#tab-hist").addEventListener("click",  function(){ S.tab="history"; render(); });
+$("#tab-sched").addEventListener("click", function(){ goTab("sched"); });
+$("#tab-summary").addEventListener("click", function(){ goTab("summary"); });
+$("#tab-rank").addEventListener("click",  function(){ goTab("rank"); });
+$("#tab-hist").addEventListener("click",  function(){ goTab("history"); });
 $("#to-hist").addEventListener("click",   function(){ S.tab="history"; render(); });
 $("#newday").addEventListener("click", startNew);
 $("#mode-change").addEventListener("click", function(){
+  if (viewOnly && !confirm("공유받은 결과를 닫고 종목을 다시 고를까요?")) return;
   if (dirty) save();
   startNewFromView();
+  scrollMem = {};
   S.schedule = null; DB.current = null; S.savedAt = null; dirty = false;
   introStep = 1; S.mode = null; S.tab = "sched";
   render(); window.scrollTo({top:0});
 });
-$("#date").addEventListener("change", function(){ S.date = this.value || todayStr(); });
+$("#date").addEventListener("change", function(){ S.date = this.value || todayStr(); renderSetup(); save(); });
+
+$("#make2").addEventListener("click", function(){ if (!this.disabled) $("#make").click(); });
+
+// 지난 경기 명단 그대로 가져오기
+$("#load-roster").addEventListener("click", function(){
+  var k = this.dataset.d, src = DB.sessions[k];
+  if (!src) return;
+  var n = Math.max(minPlayers(S.mode), Math.min(16, src.count || S.count));
+  S.count = n;
+  S.names = (src.names || []).slice(0, n);
+  S.levels = (src.levels || []).slice(0, n);
+  S.genders = (src.genders || []).slice(0, n);
+  S.names.length = n;
+  ensureLevels();
+  if (S.pair === "mixed") ensureGenders();
+  courtTouched = false;
+  renderSetup(); save();
+  toast(fmtDate(k) + " 명단 " + n + "명을 불러왔습니다");
+});
 
 $("#make").addEventListener("click", function(){
+  if (viewOnly && !confirm("공유받은 결과를 닫고 새 대진을 만들까요?")) return;
+  startNewFromView();
+  scrollMem = {};
   S.date = $("#date").value || todayStr();
   if (DB.sessions[S.date] && !confirm(fmtDateFull(S.date) + " 기록이 이미 있습니다. 새로 만들면 기존 결과가 사라집니다.")) return;
   S.names.length = S.count;
@@ -1906,25 +2133,36 @@ $("#share").addEventListener("click", function(){
   try { url = shareUrl(); }
   catch(e){ toast("공유 링크를 만들지 못했습니다"); return; }
   if (url.length > 8000){ toast("결과가 너무 커서 링크로 공유할 수 없습니다"); return; }
-  var pr = progressOf(S);
-  var txt = "🎾 " + fmtDateFull(S.date) + " 테니스 결과 (" + pr.done + "/" + pr.all + " 경기)\n" + url;
+  var pr = progressOf(S), rows = stats();
+  var top = rows.filter(function(r){ return r.g > 0; }).slice(0,3).map(function(r){
+    return r.rank + "위 " + nameOf(r.i) + " " + r.w + "승" + r.l + "패(" + (r.dif>0?"+":"") + r.dif + ")";
+  }).join(" · ");
+  var txt = "🎾 " + fmtDate(S.date) + " 테니스 결과\n"
+    + modeLabel(S) + " · " + S.count + "명 · 코트 " + S.courts + "면 · "
+    + S.schedule.length + "라운드 (" + pr.done + "/" + pr.all + " 경기)\n"
+    + (top ? top + "\n" : "")
+    + "전체 대진·순위 보기 ↓";
   if (navigator.share){
-    navigator.share({ title:"테니스 결과", text:txt })["catch"](function(){
-      copyText(txt, "공유 링크를 복사했습니다");
+    navigator.share({ title:"테니스 결과", text:txt, url:url })["catch"](function(){
+      copyText(txt + "\n" + url, "공유 링크를 복사했습니다");
     });
-  } else copyText(txt, "공유 링크를 복사했습니다");
+  } else copyText(txt + "\n" + url, "공유 링크를 복사했습니다");
 });
 
-$("#import").addEventListener("click", function(){
+// 공유받은 결과를 내 기기 기록으로 가져온다 (대진표 안의 안내 카드에서 호출)
+function doImport(){
   if (!viewOnly) return;
-  if (DB.sessions[S.date] && !confirm(fmtDateFull(S.date) + " 기록이 이미 있습니다. 공유받은 결과로 덮어쓸까요?")) return;
+  var msg = DB.sessions[S.date]
+    ? fmtDateFull(S.date) + " 기록이 이미 있습니다. 공유받은 결과로 덮어쓸까요?"
+    : fmtDateFull(S.date) + " 결과를 내 기기에 저장할까요? 저장하면 점수를 수정할 수 있게 됩니다.";
+  if (!confirm(msg)) return;
   viewOnly = false;
   S.savedAt = Date.now();
   save();
   if (location.hash) history.replaceState(null, "", location.pathname + location.search);
   render();
-  toast("내 기록에 저장했습니다");
-});
+  toast("내 기록에 저장했습니다 · 기록 탭에서 삭제할 수 있습니다");
+}
 
 /* 페이지를 벗어날 때 미저장 점수 자동 백업 */
 function flush(){ if (dirty && S.schedule) save(); }
@@ -1938,17 +2176,20 @@ function startNewFromView(){
 
 /* ---------------- boot ---------------- */
 // 공유 링크(#v1=...)로 들어왔으면 그 결과를 읽기 전용으로 먼저 보여준다
+var shareHash = /[#&]v1=([A-Za-z0-9\-_]+)/.exec((typeof location !== "undefined" && location.hash) || "");
+var shareErr = false;
+
 function openShared(){
-  var m = /[#&]v1=([A-Za-z0-9\-_]+)/.exec(location.hash || "");
-  if (!m) return false;
+  if (!shareHash) return false;
   try {
-    var sess = decodeShare(m[1]);
-    hydrate(sess);
+    hydrate(decodeShare(shareHash[1]));
     viewOnly = true;
     S.tab = "sched";
     return true;
   } catch(e){
-    toast("공유 링크를 읽을 수 없습니다");
+    // 실패하면 내 옛 기록이 남의 결과로 오인되지 않도록 설정 화면으로 보낸다
+    shareErr = true;
+    S.mode = null; S.schedule = null; viewOnly = false;
     return false;
   }
 }
@@ -1956,12 +2197,13 @@ function openShared(){
 Store.get().then(function(saved){
   if (saved && saved.sessions){
     DB = { sessions: saved.sessions || {}, current: saved.current || null };
-    if (DB.current && DB.sessions[DB.current]) hydrate(DB.sessions[DB.current]);
+    // 공유 링크로 들어왔으면 내 마지막 세션을 띄우지 않는다
+    if (!shareHash && DB.current && DB.sessions[DB.current]) hydrate(DB.sessions[DB.current]);
   } else if (saved && saved.count){
     // 구버전(단일 세션) 데이터 → 오늘 날짜 기록으로 이관
     var d = saved.date || todayStr();
     saved.date = d;
-    if (saved.schedule){ DB.sessions[d] = saved; DB.current = d; hydrate(saved); }
+    if (saved.schedule){ DB.sessions[d] = saved; DB.current = d; if (!shareHash) hydrate(saved); }
     else { S.count = saved.count; S.games = saved.games || saved.rounds || 4; S.names = saved.names || []; }
     Store.set(DB);
   }
