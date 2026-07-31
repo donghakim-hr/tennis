@@ -73,6 +73,28 @@
     background:var(--card);border:1px solid var(--hair);border-radius:14px;
     padding:16px;box-shadow:var(--shadow);
   }
+  /* ---------- 접이식 설정 카드 ---------- */
+  .fold .foldhead{display:flex;align-items:center;gap:10px}
+  .fold .foldhead .eyebrow{margin:0}
+  .fold .foldbody{margin-top:8px}
+  .fold .foldsum,.fold .chev{display:none}
+  .fold.can .foldhead{cursor:pointer;user-select:none}
+  .fold.can .foldsum{
+    display:block;margin-left:auto;font-size:13px;font-weight:700;color:var(--ink);
+    letter-spacing:-.01em;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .fold.can .chev{
+    display:block;flex:0 0 auto;width:8px;height:8px;margin-right:2px;
+    border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);
+    transform:rotate(45deg) translate(-2px,-2px);transition:transform .15s;
+  }
+  .fold.can.closed .chev{transform:rotate(-45deg) translate(-1px,-1px)}
+  .fold.closed .foldbody{display:none}
+  .foldall{
+    appearance:none;border:1px solid var(--hair);background:var(--card);color:var(--muted);
+    font:inherit;font-size:12.5px;font-weight:700;padding:9px;border-radius:10px;cursor:pointer;
+    width:100%;letter-spacing:-.01em;
+  }
   .btn{
     appearance:none;font:inherit;font-weight:700;cursor:pointer;
     border-radius:10px;padding:12px 16px;border:1px solid var(--hair);
@@ -350,46 +372,60 @@
   <section id="intro" class="intro" hidden></section>
 
   <section id="setup" class="setup">
-    <div class="card">
-      <p class="eyebrow">종목</p>
-      <div class="row" style="align-items:center;justify-content:space-between">
-        <span id="mode-label" style="font-size:16px;font-weight:800;letter-spacing:-.02em"></span>
-        <button class="btn" id="mode-change" style="padding:9px 14px;font-size:13px">변경</button>
+    <button class="foldall" id="fold-all" hidden></button>
+
+    <div class="card fold" data-fold="mode">
+      <div class="foldhead"><p class="eyebrow">종목</p><span class="foldsum"></span><span class="chev" aria-hidden="true"></span></div>
+      <div class="foldbody">
+        <div class="row" style="align-items:center;justify-content:space-between">
+          <span id="mode-label" style="font-size:16px;font-weight:800;letter-spacing:-.02em"></span>
+          <button class="btn" id="mode-change" style="padding:9px 14px;font-size:13px">변경</button>
+        </div>
       </div>
     </div>
 
-    <div class="card">
-      <p class="eyebrow">경기 일자</p>
-      <input type="date" id="date" class="dateinput">
-    </div>
-
-    <div class="card">
-      <p class="eyebrow">참가 인원</p>
-      <div class="stepper">
-        <button class="step-btn" id="p-minus" aria-label="인원 줄이기">−</button>
-        <span class="step-val" id="p-val">8</span>
-        <span class="step-unit">명<br><span id="p-range">4 – 16</span></span>
-        <button class="step-btn" id="p-plus" aria-label="인원 늘리기" style="margin-left:auto">+</button>
+    <div class="card fold" data-fold="date">
+      <div class="foldhead"><p class="eyebrow">경기 일자</p><span class="foldsum"></span><span class="chev" aria-hidden="true"></span></div>
+      <div class="foldbody">
+        <input type="date" id="date" class="dateinput">
       </div>
-      <p class="hint" id="court-hint" style="margin-top:10px"></p>
     </div>
 
-    <div class="card">
-      <p class="eyebrow">코트 수</p>
-      <div class="chips" id="c-chips"></div>
-      <p class="hint" id="court-detail" style="margin-top:10px"></p>
+    <div class="card fold" data-fold="count">
+      <div class="foldhead"><p class="eyebrow">참가 인원</p><span class="foldsum"></span><span class="chev" aria-hidden="true"></span></div>
+      <div class="foldbody">
+        <div class="stepper">
+          <button class="step-btn" id="p-minus" aria-label="인원 줄이기">−</button>
+          <span class="step-val" id="p-val">8</span>
+          <span class="step-unit">명<br><span id="p-range">4 – 16</span></span>
+          <button class="step-btn" id="p-plus" aria-label="인원 늘리기" style="margin-left:auto">+</button>
+        </div>
+        <p class="hint" id="court-hint" style="margin-top:10px"></p>
+      </div>
     </div>
 
-    <div class="card">
-      <p class="eyebrow">1인당 경기 수</p>
-      <div class="chips" id="r-chips"></div>
-      <p class="hint" id="round-hint" style="margin-top:10px"></p>
+    <div class="card fold" data-fold="courts">
+      <div class="foldhead"><p class="eyebrow">코트 수</p><span class="foldsum"></span><span class="chev" aria-hidden="true"></span></div>
+      <div class="foldbody">
+        <div class="chips" id="c-chips"></div>
+        <p class="hint" id="court-detail" style="margin-top:10px"></p>
+      </div>
     </div>
 
-    <div class="card">
-      <p class="eyebrow">참가자 이름</p>
-      <p class="hint">비워두면 참가자 번호로 표시됩니다.</p>
-      <div class="names" id="names"></div>
+    <div class="card fold" data-fold="games">
+      <div class="foldhead"><p class="eyebrow">1인당 경기 수</p><span class="foldsum"></span><span class="chev" aria-hidden="true"></span></div>
+      <div class="foldbody">
+        <div class="chips" id="r-chips"></div>
+        <p class="hint" id="round-hint" style="margin-top:10px"></p>
+      </div>
+    </div>
+
+    <div class="card fold" data-fold="names">
+      <div class="foldhead"><p class="eyebrow">참가자 이름</p><span class="foldsum"></span><span class="chev" aria-hidden="true"></span></div>
+      <div class="foldbody">
+        <p class="hint">비워두면 참가자 번호로 표시됩니다.</p>
+        <div class="names" id="names"></div>
+      </div>
     </div>
 
     <div class="warnbox" id="store-warn" hidden></div>
@@ -866,6 +902,89 @@ function ensureGenders(){
   S.genders.length = S.count;
 }
 
+/* ---------------- 설정 카드 접기 ----------------
+   참가자 이름을 전원 입력하면 설정 카드들이 한 번 자동으로 접히고,
+   이후에는 카드 머리글을 눌러 자유롭게 펼치거나 접을 수 있다. */
+var FOLD_KEYS = ["mode","date","count","courts","games","names"];
+var foldClosed = {};     // 접혀 있는 카드
+var foldAuto   = false;  // 전원 입력에 따른 자동 접기를 이미 했는지
+var foldBound  = false;
+
+function allNamesFilled(){
+  for (var i=0;i<S.count;i++){ if (!String(S.names[i]||"").trim()) return false; }
+  return true;
+}
+
+function foldSummary(key){
+  switch (key){
+    case "mode":   return modeLabel(S);
+    case "date":   return S.date;
+    case "count":  return S.count + "명";
+    case "courts": return "코트 " + S.courts + "면";
+    case "games":  return "1인당 " + S.games + "경기";
+    case "names":
+      var ns = [];
+      for (var i=0;i<S.count;i++) ns.push(String(S.names[i]||"").trim() || ("참가자 " + (i+1)));
+      return ns.join(", ");
+  }
+  return "";
+}
+
+function bindFold(){
+  if (foldBound) return;
+  foldBound = true;
+  Array.prototype.forEach.call(document.querySelectorAll("#setup .fold"), function(card){
+    var key = card.dataset.fold;
+    var head = card.querySelector(".foldhead");
+    function toggle(){
+      if (!card.classList.contains("can")) return;
+      foldClosed[key] = !foldClosed[key];
+      paintFold(true);
+    }
+    head.addEventListener("click", toggle);
+    head.addEventListener("keydown", function(e){
+      if (e.key === "Enter" || e.key === " "){ e.preventDefault(); toggle(); }
+    });
+  });
+  $("#fold-all").addEventListener("click", function(){
+    var anyOpen = FOLD_KEYS.some(function(k){ return !foldClosed[k]; });
+    FOLD_KEYS.forEach(function(k){ foldClosed[k] = anyOpen; });
+    paintFold(true);
+  });
+}
+
+function paintFold(can){
+  Array.prototype.forEach.call(document.querySelectorAll("#setup .fold"), function(card){
+    var key = card.dataset.fold;
+    card.classList.toggle("can", can);
+    card.classList.toggle("closed", can && !!foldClosed[key]);
+    card.querySelector(".foldsum").textContent = can ? foldSummary(key) : "";
+    var head = card.querySelector(".foldhead");
+    if (can){
+      head.setAttribute("role","button");
+      head.setAttribute("tabindex","0");
+      head.setAttribute("aria-expanded", foldClosed[key] ? "false" : "true");
+    } else {
+      head.removeAttribute("role"); head.removeAttribute("tabindex"); head.removeAttribute("aria-expanded");
+    }
+  });
+  var fa = $("#fold-all");
+  fa.hidden = !can;
+  if (can) fa.textContent = FOLD_KEYS.some(function(k){ return !foldClosed[k]; }) ? "설정 모두 접기" : "설정 모두 펼치기";
+}
+
+// autoClose=true 인 시점(이름 입력 완료 등)에 최초 1회 자동으로 접는다
+function refreshFold(autoClose){
+  bindFold();
+  var can = allNamesFilled();
+  if (!can){ foldClosed = {}; foldAuto = false; }
+  else if (autoClose && !foldAuto){
+    foldAuto = true;
+    FOLD_KEYS.forEach(function(k){ foldClosed[k] = true; });
+  }
+  paintFold(can);
+}
+
 /* ---------------- setup rendering ---------------- */
 function renderSetup(){
   $("#date").value = S.date;
@@ -953,7 +1072,10 @@ function renderSetup(){
       var inp = f.querySelector("input");
       inp.value = S.names[k] || "";
       inp.dataset.k = k;
-      inp.addEventListener("input", function(){ S.names[+this.dataset.k] = this.value; save(); });
+      inp.addEventListener("input", function(){ S.names[+this.dataset.k] = this.value; save(); refreshFold(false); });
+      // 입력을 마치고 칸을 벗어났을 때(전원 입력 완료 시점) 한 번 자동으로 접는다
+      inp.addEventListener("change", function(){ refreshFold(true); });
+      inp.addEventListener("blur",   function(){ refreshFold(true); });
       if (mixed){
         var gb = document.createElement("button");
         gb.type = "button"; gb.className = "gbtn"; gb.dataset.k = k;
@@ -999,6 +1121,8 @@ function renderSetup(){
       b.setAttribute("aria-label", (i3+1) + "번 성별 전환");
     });
   }
+
+  refreshFold(false);
 }
 
 /* ---------------- schedule rendering ---------------- */
