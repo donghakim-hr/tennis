@@ -319,6 +319,23 @@
   }
   .gbtn.m{background:#e8f0fa;border-color:#bcd6ef;color:#1d5b96}
   .gbtn.f{background:#fbe9f0;border-color:#f0c2d4;color:#a83a66}
+
+  /* ---------- 실력 등급 ---------- */
+  .lvbtn{
+    appearance:none;border:1px solid var(--hair);background:var(--card);cursor:pointer;
+    font:inherit;font-size:11.5px;font-weight:800;border-radius:7px;
+    padding:5px 0;width:26px;flex:0 0 auto;color:var(--muted);
+  }
+  .lvbtn.a{background:#eaf5ec;border-color:#c2e0c9;color:#256b39}
+  .lvbtn.b{background:var(--bg);border-color:var(--hair);color:var(--muted)}
+  .lvbtn.c{background:#fdf1e5;border-color:#f0d6b6;color:#96601f}
+  .lv{font-size:9.5px;font-weight:800;color:var(--muted);vertical-align:super;margin-left:1px}
+  /* ---------- 고정 조 ---------- */
+  .pairline{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .pairchip{
+    font-size:11.5px;font-weight:700;color:var(--muted);background:var(--bg);
+    border:1px solid var(--hair);border-radius:7px;padding:4px 8px;
+  }
   .warnbox{
     background:#fdecec;border:1px solid #f3c9c9;color:#8f2f2f;
     border-radius:10px;padding:12px 14px;font-size:13px;font-weight:600;line-height:1.45;
@@ -420,6 +437,28 @@
       </div>
     </div>
 
+    <div class="card fold" data-fold="partner" id="card-partner" hidden>
+      <div class="foldhead"><p class="eyebrow">파트너</p><span class="foldsum"></span><span class="chev" aria-hidden="true"></span></div>
+      <div class="foldbody">
+        <div class="seg" id="pt-seg" style="width:100%">
+          <button data-p="random">랜덤</button>
+          <button data-p="fixed">고정 조</button>
+        </div>
+        <p class="hint" id="pt-hint" style="margin-top:10px"></p>
+      </div>
+    </div>
+
+    <div class="card fold" data-fold="level">
+      <div class="foldhead"><p class="eyebrow">실력 등급</p><span class="foldsum"></span><span class="chev" aria-hidden="true"></span></div>
+      <div class="foldbody">
+        <div class="seg" id="lv-seg" style="width:100%">
+          <button data-l="off">사용 안 함</button>
+          <button data-l="on">등급으로 전력 맞추기</button>
+        </div>
+        <p class="hint" id="lv-hint" style="margin-top:10px"></p>
+      </div>
+    </div>
+
     <div class="card fold" data-fold="names">
       <div class="foldhead"><p class="eyebrow">참가자 이름</p><span class="foldsum"></span><span class="chev" aria-hidden="true"></span></div>
       <div class="foldbody">
@@ -451,6 +490,8 @@
     <button class="btn ghost" id="newday">새 경기 시작</button>
     <button class="btn ghost" id="reshuffle">대진 다시 짜기</button>
     <button class="btn ghost" id="copy">결과 복사</button>
+    <button class="btn ghost" id="share">공유 링크 복사</button>
+    <button class="btn ghost" id="import" hidden>내 기록에 저장</button>
   </footer>
 </div>
 
@@ -541,14 +582,20 @@ var S = {
   courts: 2,
   games: 4,        // 1인당 경기 수 (목표)
   names: [],
+  levels: [],       // 실력 등급 3(A) | 2(B) | 1(C)
+  useLevel: false,  // 등급으로 팀 전력을 맞출지
+  mixPartner: "random",  // 혼복 전용: "random"(매번 새 파트너) | "fixed"(고정 조)
   schedule: null,   // [{ matches:[{a:[i,j],b:[k,l],sa:null,sb:null}], byes:[i] }]
   sort: "diff",     // "diff" | "win"
   savedAt: null,    // 마지막 결과 저장 시각
   tab: "sched"
 };
+var viewOnly = false;   // 공유 링크로 열었을 때 (읽기 전용, 기기에 저장하지 않음)
+
 function snapshot(){
   return { date:S.date, mode:S.mode, pair:S.pair, genders:S.genders.slice(),
            count:S.count, courts:S.courts, games:S.games, names:S.names.slice(),
+           levels:S.levels.slice(), useLevel:S.useLevel, mixPartner:S.mixPartner,
            schedule:S.schedule, sort:S.sort, savedAt:S.savedAt };
 }
 function hydrate(s){
@@ -557,10 +604,14 @@ function hydrate(s){
   S.genders = (s.genders || []).slice();
   S.courts = s.courts || maxCourts(s.count, S.mode);
   S.names = (s.names || []).slice(); S.schedule = s.schedule || null;
+  S.levels = (s.levels || []).slice();
+  S.useLevel = !!s.useLevel;
+  S.mixPartner = s.mixPartner === "fixed" ? "fixed" : "random";
   S.sort = s.sort || "diff"; S.savedAt = s.savedAt || null;
   dirty = false;
 }
 function save(){
+  if (viewOnly) return;   // 공유 링크로 본 결과는 기기에 남기지 않는다
   if (S.schedule && S.date){ DB.sessions[S.date] = snapshot(); DB.current = S.date; }
   Store.set(DB);
 }
@@ -580,12 +631,36 @@ function zeros(n){
 }
 var PAIRINGS = [[[0,1],[2,3]],[[0,2],[1,3]],[[0,3],[1,2]]];
 
-// cfg = { n, rounds, courts, type:'single'|'same'|'mixed', genders:[], anchor, cap }
+var W_PAIR = 40;   // 같은 사람과 다시 페어
+var W_OPPO = 4;    // 같은 사람과 다시 상대
+var W_BAL  = 12;   // 팀 전력 1점 차이당 (실력 등급 사용 시)
+
+// 실력 등급: 3=A(상) 2=B(중) 1=C(하). 미입력은 B로 본다
+function lvIn(sess, i){
+  var v = (sess.levels || [])[i];
+  return (v === 1 || v === 2 || v === 3) ? v : 2;
+}
+function lvArr(sess){
+  var a = []; for (var i=0;i<sess.count;i++) a.push(lvIn(sess, i));
+  return a;
+}
+// 팀 전력 차이 비용 (levels 없으면 0)
+function balCost(lv, A, B){
+  if (!lv) return 0;
+  var s = 0, i;
+  for (i=0;i<A.length;i++) s += lv[A[i]];
+  for (i=0;i<B.length;i++) s -= lv[B[i]];
+  return Math.abs(s) * W_BAL;
+}
+
+// cfg = { n, rounds, courts, type:'single'|'same'|'mixed', genders:[], lv:[]|null, anchor, cap }
 // anchor → 1라운드 코트1 고정 (복식 1·2번 vs 3·4번 / 단식 1번 vs 2번)
 // cap    → 4라운드 연속 출전이 나오지 않도록 휴식자를 우선 배정
+// lv     → 실력 등급 배열 (전달되면 팀 전력 편차도 비용에 넣는다)
 function attempt(cfg){
   var n = cfg.n, courts = cfg.courts, rounds = cfg.rounds;
   var single = cfg.type === "single", mixed = cfg.type === "mixed";
+  var lv = cfg.lv || null;
   var partner = zeros(n), oppo = zeros(n);
   var played = new Array(n).fill(0), streak = new Array(n).fill(0);
   var seats = courts * (single ? 2 : 4);
@@ -633,15 +708,15 @@ function attempt(cfg){
         if (single){
           var g2 = act.slice(idx*2, idx*2+2);
           bp = { a:[g2[0]], b:[g2[1]] };
-          bc = oppo[g2[0]][g2[1]] * 4;
+          bc = oppo[g2[0]][g2[1]] * W_OPPO + balCost(lv, bp.a, bp.b);
         } else if (mixed){
           // 팀은 반드시 남1·여1 → 짝짓는 방법은 2가지
           var m1=actM[idx*2], m2=actM[idx*2+1], f1=actF[idx*2], f2=actF[idx*2+1];
           var opts = [[[m1,f1],[m2,f2]], [[m1,f2],[m2,f1]]];
           for (k=0;k<2;k++){
             A = opts[k][0]; B = opts[k][1];
-            cc = partner[A[0]][A[1]]*40 + partner[B[0]][B[1]]*40;
-            for (x=0;x<2;x++) for (y=0;y<2;y++) cc += oppo[A[x]][B[y]]*4;
+            cc = partner[A[0]][A[1]]*W_PAIR + partner[B[0]][B[1]]*W_PAIR + balCost(lv, A, B);
+            for (x=0;x<2;x++) for (y=0;y<2;y++) cc += oppo[A[x]][B[y]]*W_OPPO;
             if (cc<bc){ bc=cc; bp={a:A,b:B}; }
           }
         } else {
@@ -650,8 +725,8 @@ function attempt(cfg){
             A=[g4[PAIRINGS[k][0][0]],g4[PAIRINGS[k][0][1]]];
             B=[g4[PAIRINGS[k][1][0]],g4[PAIRINGS[k][1][1]]];
             // partner repeats hurt much more than opponent repeats
-            cc = partner[A[0]][A[1]]*40 + partner[B[0]][B[1]]*40;
-            for (x=0;x<2;x++) for (y=0;y<2;y++) cc += oppo[A[x]][B[y]]*4;
+            cc = partner[A[0]][A[1]]*W_PAIR + partner[B[0]][B[1]]*W_PAIR + balCost(lv, A, B);
+            for (x=0;x<2;x++) for (y=0;y<2;y++) cc += oppo[A[x]][B[y]]*W_OPPO;
             if (cc<bc){ bc=cc; bp={a:A,b:B}; }
           }
         }
@@ -677,6 +752,61 @@ function attempt(cfg){
   return { rounds: out, cost: total };
 }
 
+/* ---- 파트너 고정(고정 조) 대진 ----
+   이름 순서대로 (1·2), (3·4), … 를 한 조로 묶고, 조 단위로 대진을 짠다.
+   페어는 처음부터 고정이므로 비용은 '같은 조와 다시 붙는 것'과 전력 편차만 본다. */
+function attemptFixed(cfg){
+  var pairs = cfg.pairs, T = pairs.length, courts = cfg.courts, rounds = cfg.rounds;
+  var lv = cfg.lv || null;
+  var met = zeros(T);
+  var played = new Array(T).fill(0), streak = new Array(T).fill(0);
+  var out = [], total = 0;
+  var teamIdx = Array.from({length:T},function(_,i){return i;});
+  var teamLv = pairs.map(function(p){ return lv ? lv[p[0]] + lv[p[1]] : 0; });
+
+  function ord(a,b){ return (played[a]-played[b]) || (cfg.cap ? streak[a]-streak[b] : 0); }
+  var pinOK = cfg.anchor && T >= 2;
+
+  for (var r=0;r<rounds;r++){
+    var pin = pinOK && r === 0;
+    var best=null, bestCost=Infinity;
+    for (var t=0;t<300;t++){
+      var pool = pin ? teamIdx.filter(function(x){ return x >= 2; }) : teamIdx;
+      var need = courts*2 - (pin ? 2 : 0);
+      var o = shuffle(pool); o.sort(ord);
+      var act = shuffle(o.slice(0,need)), restT = o.slice(need);
+      var ms = [], cost = 0, used = [];
+      if (pin){ ms.push({ a:pairs[0].slice(), b:pairs[1].slice(), t:[0,1] }); used.push(0,1); }
+      for (var c=0;c<need/2;c++){
+        var t1 = act[c*2], t2 = act[c*2+1];
+        ms.push({ a:pairs[t1].slice(), b:pairs[t2].slice(), t:[t1,t2] });
+        cost += met[t1][t2]*W_OPPO*2;
+        if (lv) cost += Math.abs(teamLv[t1]-teamLv[t2])*W_BAL;
+        used.push(t1,t2);
+      }
+      if (cost<bestCost){
+        bestCost = cost;
+        var byes = [];
+        teamIdx.forEach(function(x){ if (used.indexOf(x) < 0) byes = byes.concat(pairs[x]); });
+        best = { matches:ms, byes:byes };
+      }
+      if (cost===0) break;
+      // 전 조가 매 라운드 출전해도 '어느 조끼리 붙일지'는 경우가 많아 계속 재시도한다
+    }
+    var inPlay = new Array(T).fill(false);
+    best.matches.forEach(function(m){
+      met[m.t[0]][m.t[1]]++; met[m.t[1]][m.t[0]]++;
+      inPlay[m.t[0]] = inPlay[m.t[1]] = true;
+      played[m.t[0]]++; played[m.t[1]]++;
+      m.sa = null; m.sb = null;
+      delete m.t;
+    });
+    for (var q=0;q<T;q++) streak[q] = inPlay[q] ? streak[q]+1 : 0;
+    out.push(best); total += bestCost;
+  }
+  return { rounds: out, cost: total };
+}
+
 // 각 참가자의 최장 연속 출전 라운드 수
 function streaksOf(sched, n){
   var cur = new Array(n).fill(0), mx = new Array(n).fill(0);
@@ -692,6 +822,10 @@ function streaksOf(sched, n){
 
 // 4연속 출전이 물리적으로 가능한 조건인지 (라운드당 휴식 × 4 ≥ 대상 인원)
 function streakFeasible(cfg){
+  if (cfg.fixed){
+    var T = Math.floor(cfg.n/2);
+    return 4*(T - cfg.courts*2) >= T;
+  }
   if (cfg.type === "mixed"){
     var g = genderSplit(cfg);
     return 4*(g.M - cfg.courts*2) >= g.M && 4*(g.F - cfg.courts*2) >= g.F;
@@ -704,7 +838,10 @@ function buildSchedule(cfg){
   var cap = (cfg.n >= 6 && cfg.games >= 4);   // 6명 이상 · 1인당 4경기 이상일 때만 적용
   var best = null, bestScore = Infinity;
   for (var i=0;i<10;i++){
-    var a = attempt({ n:cfg.n, rounds:cfg.rounds, courts:cfg.courts,
+    var a = cfg.fixed
+      ? attemptFixed({ pairs:cfg.pairs, rounds:cfg.rounds, courts:cfg.courts,
+                       lv:cfg.lv, anchor:true, cap:cap })
+      : attempt({ n:cfg.n, rounds:cfg.rounds, courts:cfg.courts, lv:cfg.lv,
                       type:cfg.type, genders:cfg.genders, anchor:true, cap:cap });
     var vio = 0;
     if (cap) streaksOf(a.rounds, cfg.n).forEach(function(m){ if (m >= 4) vio++; });
@@ -746,15 +883,40 @@ function minPlayers(mode){ return perCourt(mode); }
 
 // 인원별 선택 가능한 최대 코트 수
 // 복식 8명↑ 2코트, 12명↑ 3코트, 16명↑ 4코트 / 단식 4명↑ 2코트, 6명↑ 3코트, 8명↑ 4코트
-function maxCourts(n, mode, genders){
+function maxCourts(n, mode, genders, fixed){
   var byCount = Math.floor(n / perCourt(mode));
   if (genders){   // 혼복은 남녀 각각 코트당 2명씩 필요
     var g = genderSplit({ n:n, genders:genders });
     byCount = Math.min(byCount, Math.floor(g.M/2), Math.floor(g.F/2));
   }
+  if (fixed) byCount = Math.min(byCount, Math.floor(Math.floor(n/2)/2));   // 조 2개 = 코트 1면
   return Math.max(1, Math.min(4, byCount));
 }
 function courtsOf(sess){ return sess.courts || maxCourts(sess.count, sess.mode); }
+
+/* ---- 고정 조(파트너 고정) ---- */
+// 이름 순서대로 2명씩 묶는다. 홀수면 마지막 1명은 빠진다
+function pairsOf(sess){
+  var ps = [];
+  for (var i=0;i+1<sess.count;i+=2) ps.push([i,i+1]);
+  return ps;
+}
+// 파트너 고정을 쓸 수 있는 상태인가 (혼복 전용 · 짝수 인원 · 각 조가 남1·여1)
+function fixedMode(sess){
+  return sess.mode === "double" && sess.pair === "mixed" && sess.mixPartner === "fixed";
+}
+function fixedProblem(sess){
+  if (sess.count % 2 !== 0) return "파트너 고정은 인원이 짝수여야 합니다. (현재 " + sess.count + "명)";
+  var ps = pairsOf(sess), gs = sess.genders || [];
+  var badAt = -1;
+  for (var i=0;i<ps.length;i++){
+    if (gs[ps[i][0]] === gs[ps[i][1]]){ badAt = i; break; }
+  }
+  if (badAt >= 0)
+    return (ps[badAt][0]+1) + "·" + (ps[badAt][1]+1) + "번 조가 같은 성별입니다. 각 조는 남 1명 · 여 1명이어야 합니다.";
+  if (ps.length < 2) return "파트너 고정은 조가 2개 이상(4명 이상) 필요합니다.";
+  return null;
+}
 
 function genderSplit(cfg){
   var M=0, F=0, gs = cfg.genders || [];
@@ -764,6 +926,10 @@ function genderSplit(cfg){
 
 // 전원이 최소 g경기를 뛰려면 몇 라운드가 필요한지
 function roundsFor(cfg){
+  if (cfg.fixed){   // 조 단위 — 한 라운드에 코트수×2 조가 뛴다
+    var T = Math.floor(cfg.n/2);
+    return Math.ceil(T * cfg.games / (cfg.courts * 2));
+  }
   if (cfg.type === "mixed"){
     var g = genderSplit(cfg);
     return Math.ceil(cfg.games * Math.max(g.M, g.F) / (cfg.courts * 2));
@@ -774,6 +940,11 @@ function roundsFor(cfg){
 // 그 라운드 수에서 실제로 배분되는 1인당 경기 수 { rounds, min, max, extra }
 function loadFor(cfg){
   var R = roundsFor(cfg);
+  if (cfg.fixed){
+    var T = Math.floor(cfg.n/2), ts = R * cfg.courts * 2;
+    var mnT = Math.floor(ts/T);
+    return { rounds:R, min:mnT, max: ts % T ? mnT+1 : mnT, extra: (ts % T) * 2 };
+  }
   if (cfg.type === "mixed"){
     var g = genderSplit(cfg), slots = R * cfg.courts * 2;
     var mn = Math.floor(slots/g.M), em = slots % g.M;
@@ -788,7 +959,27 @@ function loadFor(cfg){
 
 // 현재 설정으로 만든 계산용 cfg
 function cfgNow(){
-  return { n:S.count, courts:S.courts, games:S.games, type:typeOf(S), genders:S.genders };
+  var fx = fixedMode(S) && !fixedProblem(S);
+  return { n:S.count, courts:S.courts, games:S.games, type:typeOf(S), genders:S.genders,
+           lv: S.useLevel ? lvArr(S) : null,
+           fixed: fx, pairs: fx ? pairsOf(S) : null };
+}
+// 대진 생성용 cfg (라운드 수까지 계산)
+function genCfg(){
+  var c = cfgNow(); c.rounds = roundsFor(c); return c;
+}
+// 실제로 생성된 대진의 팀 전력 편차 평균 (등급 사용 시 표시용)
+function balOf(sess){
+  var lv = lvArr(sess), tot = 0, cnt = 0;
+  (sess.schedule || []).forEach(function(r){
+    r.matches.forEach(function(m){
+      var s = 0, i;
+      for (i=0;i<m.a.length;i++) s += lv[m.a[i]];
+      for (i=0;i<m.b.length;i++) s -= lv[m.b[i]];
+      tot += Math.abs(s); cnt++;
+    });
+  });
+  return cnt ? tot/cnt : 0;
 }
 function filled(m){ return m.sa !== null && m.sa !== "" && m.sb !== null && m.sb !== ""; }
 
@@ -823,6 +1014,90 @@ function progressOf(sess){
   var done=0, all=0;
   (sess.schedule || []).forEach(function(r){ r.matches.forEach(function(m){ all++; if (filled(m)) done++; }); });
   return { done:done, all:all };
+}
+
+/* ---------------- 공유 링크 (서버 없이 URL 해시로 결과 전달) ----------------
+   #v1=<base64url> 안에 날짜·설정·대진·점수를 담는다. 휴식자는 복원 시 다시 계산한다. */
+function b64enc(str){
+  var bin;
+  try {
+    var by = new TextEncoder().encode(str), i;
+    bin = ""; for (i=0;i<by.length;i++) bin += String.fromCharCode(by[i]);
+  } catch(e){ bin = unescape(encodeURIComponent(str)); }
+  return btoa(bin).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+function b64dec(s){
+  var bin = atob(String(s).replace(/-/g,"+").replace(/_/g,"/"));
+  try {
+    var by = new Uint8Array(bin.length), i;
+    for (i=0;i<bin.length;i++) by[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(by);
+  } catch(e){ return decodeURIComponent(escape(bin)); }
+}
+
+function encodeShare(sess){
+  var head = [
+    sess.date, sess.mode, sess.pair, sess.count, sess.courts, sess.games, sess.sort || "diff",
+    sess.useLevel ? 1 : 0, sess.mixPartner === "fixed" ? "f" : "r",
+    (sess.genders || []).slice(0, sess.count).map(function(g){ return g === "F" ? "F" : "M"; }).join(""),
+    (sess.levels  || []).slice(0, sess.count).map(function(v){ return (v===1||v===3) ? v : 2; }).join("")
+  ].join("~");
+  var body = (sess.schedule || []).map(function(r){
+    return r.matches.map(function(m){
+      return m.a.join(".") + "-" + m.b.join(".") + "="
+           + (filled(m) ? m.sa + ":" + m.sb : "");
+    }).join(",");
+  }).join(";");
+  var names = (sess.names || []).slice(0, sess.count).map(function(v){
+    return String(v || "").replace(/[|~;\n]/g, " ");
+  }).join("|");
+  return b64enc([head, names, body].join("\n"));   // 구획은 개행 — 데이터에 들어갈 수 없다
+}
+
+function decodeShare(code){
+  var raw = b64dec(code), parts = raw.split("\n");
+  if (parts.length < 3) throw new Error("형식 오류");
+  var h = parts[0].split("~");
+  var count = +h[3];
+  if (!(count >= 2 && count <= 16)) throw new Error("인원 오류");
+  var sess = {
+    date: h[0], mode: h[1] === "single" ? "single" : "double",
+    pair: h[2] === "mixed" ? "mixed" : "same",
+    count: count, courts: +h[4] || 1, games: +h[5] || 4,
+    sort: h[6] === "win" ? "win" : "diff",
+    useLevel: h[7] === "1", mixPartner: h[8] === "f" ? "fixed" : "random",
+    genders: String(h[9] || "").split("").map(function(c){ return c === "F" ? "F" : "M"; }),
+    levels: String(h[10] || "").split("").map(function(c){ var v = +c; return (v===1||v===3) ? v : 2; }),
+    names: parts[1] === "" ? [] : parts[1].split("|"),
+    savedAt: null
+  };
+  sess.schedule = (parts[2] === "" ? [] : parts[2].split(";")).map(function(rs){
+    var inPlay = {};
+    var matches = rs.split(",").map(function(ms){
+      var mm = ms.split("=");
+      var sides = mm[0].split("-");
+      var team = function(t){
+        return t.split(".").map(function(x){
+          var i = +x;
+          if (!(i >= 0 && i < count)) throw new Error("번호 오류");
+          inPlay[i] = 1; return i;
+        });
+      };
+      var sc = (mm[1] || "").split(":");
+      return { a:team(sides[0]), b:team(sides[1]),
+               sa: sc[0] === "" || sc[0] === undefined ? null : +sc[0],
+               sb: sc[1] === "" || sc[1] === undefined ? null : +sc[1] };
+    });
+    var byes = [];
+    for (var i=0;i<count;i++) if (!inPlay[i]) byes.push(i);
+    return { matches:matches, byes:byes };
+  });
+  return sess;
+}
+
+function shareUrl(){
+  var base = location.origin + location.pathname + location.search;
+  return base + "#v1=" + encodeShare(snapshot());
 }
 
 function toast(msg){
@@ -894,6 +1169,15 @@ function finishIntro(){
   window.scrollTo({top:0});
 }
 
+// 실력 등급 표기 (내부값 3·2·1 → A·B·C)
+var LVL = { 3:"A", 2:"B", 1:"C" };
+function ensureLevels(){
+  for (var i=0;i<S.count;i++){
+    if (S.levels[i] !== 1 && S.levels[i] !== 2 && S.levels[i] !== 3) S.levels[i] = 2;
+  }
+  S.levels.length = S.count;
+}
+
 // 혼복 기본 성별: 남·여 번갈아 (1·2번, 3·4번이 각각 남녀 한 쌍이 되도록)
 function ensureGenders(){
   for (var i=0;i<S.count;i++){
@@ -905,7 +1189,7 @@ function ensureGenders(){
 /* ---------------- 설정 카드 접기 ----------------
    참가자 이름을 전원 입력하면 설정 카드들이 한 번 자동으로 접히고,
    이후에는 카드 머리글을 눌러 자유롭게 펼치거나 접을 수 있다. */
-var FOLD_KEYS = ["mode","date","count","courts","games","names"];
+var FOLD_KEYS = ["mode","date","count","courts","games","partner","level","names"];
 var foldClosed = {};     // 접혀 있는 카드
 var foldAuto   = false;  // 전원 입력에 따른 자동 접기를 이미 했는지
 var foldBound  = false;
@@ -922,6 +1206,12 @@ function foldSummary(key){
     case "count":  return S.count + "명";
     case "courts": return "코트 " + S.courts + "면";
     case "games":  return "1인당 " + S.games + "경기";
+    case "partner":return S.mixPartner === "fixed" ? "고정 조" : "랜덤";
+    case "level":
+      if (!S.useLevel) return "사용 안 함";
+      var c = { A:0, B:0, C:0 };
+      for (var j=0;j<S.count;j++) c[LVL[lvIn(S,j)]]++;
+      return "A " + c.A + " · B " + c.B + " · C " + c.C;
     case "names":
       var ns = [];
       for (var i=0;i<S.count;i++) ns.push(String(S.names[i]||"").trim() || ("참가자 " + (i+1)));
@@ -998,7 +1288,9 @@ function renderSetup(){
   $("#p-plus").disabled  = S.count >= 16;
   $("#p-range").textContent = mn + " – 16";
 
-  var maxC = maxCourts(S.count, S.mode, mixed ? S.genders : null);
+  ensureLevels();
+  var fx = fixedMode(S), fxBad = fx ? fixedProblem(S) : null;
+  var maxC = maxCourts(S.count, S.mode, mixed ? S.genders : null, fx && !fxBad);
   if (!courtTouched) S.courts = maxC;
   if (S.courts > maxC) S.courts = maxC;
   var pc = perCourt(S.mode);
@@ -1021,7 +1313,54 @@ function renderSetup(){
   });
   var rest = S.count - S.courts*pc;
   $("#court-detail").textContent = "코트 " + S.courts + "면 동시 진행 · "
-    + (rest ? "매 라운드 " + rest + "명 휴식" : "전원 매 라운드 출전");
+    + (rest ? "매 라운드 " + rest + "명 휴식" : "전원 매 라운드 출전")
+    + (fx && !fxBad ? " (고정 조 " + pairsOf(S).length + "조 중 " + (S.courts*2) + "조 출전)" : "");
+
+  // 파트너 (혼복 전용) — 랜덤 / 고정 조
+  var pcard = $("#card-partner");
+  pcard.hidden = !mixed;
+  if (mixed){
+    if (!$("#pt-seg").dataset.bound){
+      $("#pt-seg").dataset.bound = "1";
+      Array.prototype.forEach.call($("#pt-seg").children, function(b){
+        b.addEventListener("click", function(){
+          S.mixPartner = this.dataset.p;
+          courtTouched = false;   // 고정/랜덤에 따라 코트 상한이 달라진다
+          renderSetup(); save();
+        });
+      });
+    }
+    Array.prototype.forEach.call($("#pt-seg").children, function(b){
+      b.setAttribute("aria-pressed", b.dataset.p === S.mixPartner ? "true" : "false");
+    });
+    var ph = $("#pt-hint");
+    if (S.mixPartner !== "fixed"){
+      ph.innerHTML = "매 경기 <b>새로운 파트너</b>와 팀이 됩니다. 같은 사람과 두 번 짝이 되지 않도록 배분합니다.";
+    } else if (fxBad){
+      ph.innerHTML = '<span style="color:#b03b3b;font-weight:700">' + esc(fxBad) + "</span>";
+    } else {
+      ph.innerHTML = "이름 순서대로 <b>2명씩 한 조</b>가 되어 대회 끝까지 같은 파트너로 뜁니다. "
+        + "조 편성을 바꾸려면 이름 순서를 바꾸세요."
+        + '<span class="pairline">' + pairsOf(S).map(function(p, i){
+            return '<span class="pairchip">' + (i+1) + "조 · " + esc(nameOf(p[0])) + " · " + esc(nameOf(p[1])) + "</span>";
+          }).join("") + "</span>";
+    }
+  }
+
+  // 실력 등급
+  if (!$("#lv-seg").dataset.bound){
+    $("#lv-seg").dataset.bound = "1";
+    Array.prototype.forEach.call($("#lv-seg").children, function(b){
+      b.addEventListener("click", function(){ S.useLevel = this.dataset.l === "on"; renderSetup(); save(); });
+    });
+  }
+  Array.prototype.forEach.call($("#lv-seg").children, function(b){
+    b.setAttribute("aria-pressed", (b.dataset.l === "on") === !!S.useLevel ? "true" : "false");
+  });
+  $("#lv-hint").innerHTML = S.useLevel
+    ? "이름 칸의 <b>A · B · C</b> 버튼으로 등급을 정하면 양 팀 전력 합이 비슷해지도록 팀을 짭니다. "
+      + "(A 상 · B 중 · C 하, 기본 B) 페어·상대 중복 회피가 우선이고 그다음 전력 균형입니다."
+    : "등급을 쓰지 않으면 실력과 무관하게 중복 회피만 고려합니다.";
 
   var chips = $("#r-chips");
   if (!chips.children.length){
@@ -1043,6 +1382,7 @@ function renderSetup(){
     if (g.M < 2 || g.F < 2) bad = "혼성 복식은 남녀 각각 2명 이상이 필요합니다. (현재 남 " + g.M + " · 여 " + g.F + ")";
     else if (g.M < S.courts*2 || g.F < S.courts*2)
       bad = "코트 " + S.courts + "면을 채우려면 남녀 각각 " + (S.courts*2) + "명 이상이 필요합니다. (현재 남 " + g.M + " · 여 " + g.F + ")";
+    else if (fxBad) bad = "파트너 고정: " + fxBad;
   }
   $("#mixed-warn").hidden = !bad;
   if (bad) $("#mixed-warn-msg").textContent = bad;
@@ -1062,9 +1402,11 @@ function renderSetup(){
   }
 
   var box = $("#names");
-  if (box.children.length !== S.count || box.dataset.mixed !== String(mixed)){
+  if (box.children.length !== S.count || box.dataset.mixed !== String(mixed)
+      || box.dataset.lv !== String(!!S.useLevel)){
     box.innerHTML = "";
     box.dataset.mixed = String(mixed);
+    box.dataset.lv = String(!!S.useLevel);
     for (var k=0;k<S.count;k++){
       var f = document.createElement("label");
       f.className = "name-field";
@@ -1086,6 +1428,17 @@ function renderSetup(){
           renderSetup(); save();
         });
         f.appendChild(gb);
+      }
+      if (S.useLevel){
+        var lb = document.createElement("button");
+        lb.type = "button"; lb.className = "lvbtn"; lb.dataset.k = k;
+        lb.addEventListener("click", function(e){
+          e.preventDefault();
+          var i4 = +this.dataset.k;
+          S.levels[i4] = lvIn(S, i4) === 3 ? 2 : (lvIn(S, i4) === 2 ? 1 : 3);   // A→B→C→A
+          renderSetup(); save();
+        });
+        f.appendChild(lb);
       }
       box.appendChild(f);
     }
@@ -1121,6 +1474,14 @@ function renderSetup(){
       b.setAttribute("aria-label", (i3+1) + "번 성별 전환");
     });
   }
+  if (S.useLevel){
+    Array.prototype.forEach.call(box.querySelectorAll(".lvbtn"), function(b){
+      var i5 = +b.dataset.k, v = lvIn(S, i5);
+      b.textContent = LVL[v];
+      b.className = "lvbtn " + LVL[v].toLowerCase();
+      b.setAttribute("aria-label", (i5+1) + "번 실력 등급 (현재 " + LVL[v] + ")");
+    });
+  }
 
   refreshFold(false);
 }
@@ -1140,9 +1501,19 @@ function renderSchedule(){
   var dupWord = S.mode === "single" ? "중복 대진" : "중복 페어";
   head.textContent = modeLabel(S) + " · " + S.count + "명 · 1인당 " + L.min + "경기" + (L.extra ? "+" : "")
     + " · " + S.schedule.length + "라운드 · 코트 " + S.courts + "면"
-    + (dup ? " · " + dupWord + " " + dup + "회" : " · " + dupWord + " 없음")
-    + " · 최장 연속 " + worst + "경기";
+    + (cfg.fixed ? " · 파트너 고정" : "")
+    + (cfg.fixed ? "" : (dup ? " · " + dupWord + " " + dup + "회" : " · " + dupWord + " 없음"))
+    + " · 최장 연속 " + worst + "경기"
+    + (S.useLevel ? " · 팀 전력 편차 평균 " + balOf(S).toFixed(1) : "");
   host.appendChild(head);
+
+  if (viewOnly){
+    var vo = document.createElement("p");
+    vo.className = "hint";
+    vo.style.margin = "6px 0 0";
+    vo.textContent = "공유 링크로 열어본 결과입니다. 점수는 수정할 수 없고 이 기기에 저장되지 않습니다.";
+    host.appendChild(vo);
+  }
 
   if (S.count >= 6 && S.games >= 4 && worst >= 4 && !streakFeasible(cfg)){
     var warn = document.createElement("p");
@@ -1193,10 +1564,13 @@ function side(m, key, ri, mi){
   var win  = filled(m) && (+sc) > (+other);
   return '<div class="side">' +
     '<div class="players">' +
-      '<div class="nm">' + team.map(function(t){ return esc(nameOf(t)); }).join(" · ") + '</div>' +
+      '<div class="nm">' + team.map(function(t){
+        return esc(nameOf(t)) + (S.useLevel ? '<span class="lv">' + LVL[lvIn(S,t)] + '</span>' : "");
+      }).join(" · ") + '</div>' +
       '<div class="sub">' + (key === "a" ? "A" : "B") + (team.length > 1 ? "팀" : "") + '</div>' +
     '</div>' +
     '<input class="score' + (win ? " win" : "") + '" type="number" inputmode="numeric" min="0" max="99" ' +
+      (viewOnly ? "readonly " : "") +
       'placeholder="–" value="' + (sc === null || sc === "" ? "" : sc) + '" ' +
       'data-r="' + ri + '" data-m="' + mi + '" data-k="' + key + '" ' +
       'aria-label="' + team.map(function(t){ return esc(nameOf(t)); }).join(" ") + ' 점수">' +
@@ -1208,7 +1582,7 @@ function esc(s){ return String(s).replace(/[&<>"]/g, function(c){
 /* live score entry — updates without rebuilding the whole list (keeps focus) */
 $("#sched").addEventListener("input", function(e){
   var el = e.target;
-  if (!el.classList.contains("score")) return;
+  if (viewOnly || !el.classList.contains("score")) return;
   var v = el.value.replace(/[^0-9]/g,"").slice(0,2);
   if (v !== el.value) el.value = v;
   var m = S.schedule[+el.dataset.r].matches[+el.dataset.m];
@@ -1265,7 +1639,8 @@ function renderSummary(){
       if (hit){ total++; cells += '<td><span class="cell c' + (hit.c % 4) + '">' + (hit.c+1) + hit.t + '</span></td>'; }
       else cells += '<td><span class="cell bye">휴</span></td>';
     });
-    mxBody += "<tr><td>" + esc(nameOf(p)) + "</td>" + cells +
+    mxBody += "<tr><td>" + esc(nameOf(p))
+      + (S.useLevel ? '<span class="lv">' + LVL[lvIn(S,p)] + "</span>" : "") + "</td>" + cells +
       "<td><b>" + total + "</b></td>" +
       '<td class="' + (streaks[p] >= 4 ? "diff neg" : "") + '">' + streaks[p] + "</td></tr>";
   }
@@ -1317,6 +1692,7 @@ function renderHistory(){
 
   Array.prototype.forEach.call(host.querySelectorAll(".hist-open"), function(b){
     b.addEventListener("click", function(){
+      startNewFromView();
       hydrate(DB.sessions[this.dataset.d]);
       DB.current = S.date; S.tab = "sched"; render(); save(); window.scrollTo({top:0});
     });
@@ -1335,6 +1711,7 @@ function renderHistory(){
 
 function startNew(){
   if (dirty) save();
+  startNewFromView();
   courtTouched = false;
   S.schedule = null; DB.current = null; S.savedAt = null; dirty = false;
   S.date = todayStr(); S.tab = "sched";
@@ -1385,7 +1762,7 @@ function fmtTime(ts){
 }
 
 function renderSaveBar(){
-  var show = !!S.schedule && S.tab === "sched";
+  var show = !!S.schedule && S.tab === "sched" && !viewOnly;
   $("#savebar").hidden = !show;
   d.body.classList.toggle("has-savebar", show);
   if (!show) return;
@@ -1425,6 +1802,9 @@ function render(){
   $("#tab-rank").setAttribute("aria-selected", S.tab === "rank");
   $("#tab-hist").setAttribute("aria-selected", hist);
 
+  $("#reshuffle").hidden = viewOnly;
+  $("#import").hidden = !viewOnly || !live;
+
   var chip = $("#datechip");
   chip.hidden = !live;
   if (live) chip.textContent = fmtDate(S.date);
@@ -1448,6 +1828,7 @@ $("#to-hist").addEventListener("click",   function(){ S.tab="history"; render();
 $("#newday").addEventListener("click", startNew);
 $("#mode-change").addEventListener("click", function(){
   if (dirty) save();
+  startNewFromView();
   S.schedule = null; DB.current = null; S.savedAt = null; dirty = false;
   introStep = 1; S.mode = null; S.tab = "sched";
   render(); window.scrollTo({top:0});
@@ -1458,7 +1839,7 @@ $("#make").addEventListener("click", function(){
   S.date = $("#date").value || todayStr();
   if (DB.sessions[S.date] && !confirm(fmtDateFull(S.date) + " 기록이 이미 있습니다. 새로 만들면 기존 결과가 사라집니다.")) return;
   S.names.length = S.count;
-  S.schedule = buildSchedule({ n:S.count, courts:S.courts, games:S.games, type:typeOf(S), genders:S.genders, rounds:roundsFor(cfgNow()) });
+  S.schedule = buildSchedule(genCfg());
   S.savedAt = null; dirty = false;
   S.tab = "sched";
   render(); save();
@@ -1467,7 +1848,7 @@ $("#make").addEventListener("click", function(){
 
 $("#reshuffle").addEventListener("click", function(){
   if (!confirm("대진을 새로 짭니다. 입력한 점수는 모두 지워집니다.")) return;
-  S.schedule = buildSchedule({ n:S.count, courts:S.courts, games:S.games, type:typeOf(S), genders:S.genders, rounds:roundsFor(cfgNow()) });
+  S.schedule = buildSchedule(genCfg());
   S.savedAt = null; dirty = false;
   render(); save(); toast("대진을 새로 짰습니다");
 });
@@ -1485,7 +1866,9 @@ $("#copy").addEventListener("click", function(){
   var rows = stats();
   var txt = "🎾 테니스 결과 · " + fmtDateFull(S.date) + "\n(" + modeLabel(S) + " · "
           + S.count + "명 · 코트 " + S.courts + "면 · 1인당 " + loadFor(cfgNow()).min
-          + "경기 · " + S.schedule.length + "라운드)\n\n";
+          + "경기 · " + S.schedule.length + "라운드"
+          + (fixedMode(S) ? " · 파트너 고정" : "")
+          + (S.useLevel ? " · 등급 반영" : "") + ")\n\n";
   S.schedule.forEach(function(r, ri){
     txt += "[" + (ri+1) + "라운드]\n";
     r.matches.forEach(function(m){
@@ -1501,17 +1884,46 @@ $("#copy").addEventListener("click", function(){
     txt += r.rank + ". " + nameOf(r.i) + "  " + r.w + "승" + r.d + "무" + r.l + "패  "
         + "득실 " + (r.dif>0?"+":"") + r.dif + "\n";
   });
-  var done = function(){ toast("결과를 복사했습니다"); };
-  if (navigator.clipboard && navigator.clipboard.writeText){
-    navigator.clipboard.writeText(txt).then(done, fallback);
-  } else fallback();
-  function fallback(){
+  copyText(txt, "결과를 복사했습니다");
+});
+
+function copyText(txt, okMsg){
+  var done = function(){ toast(okMsg); };
+  var fallback = function(){
     var ta = document.createElement("textarea");
     ta.value = txt; ta.style.position="fixed"; ta.style.opacity="0";
     document.body.appendChild(ta); ta.select();
     try { document.execCommand("copy"); done(); } catch(e){ toast("복사에 실패했습니다"); }
     document.body.removeChild(ta);
-  }
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(done, fallback);
+  } else fallback();
+}
+
+$("#share").addEventListener("click", function(){
+  var url;
+  try { url = shareUrl(); }
+  catch(e){ toast("공유 링크를 만들지 못했습니다"); return; }
+  if (url.length > 8000){ toast("결과가 너무 커서 링크로 공유할 수 없습니다"); return; }
+  var pr = progressOf(S);
+  var txt = "🎾 " + fmtDateFull(S.date) + " 테니스 결과 (" + pr.done + "/" + pr.all + " 경기)\n" + url;
+  if (navigator.share){
+    navigator.share({ title:"테니스 결과", text:txt })["catch"](function(){
+      copyText(txt, "공유 링크를 복사했습니다");
+    });
+  } else copyText(txt, "공유 링크를 복사했습니다");
+});
+
+$("#import").addEventListener("click", function(){
+  if (!viewOnly) return;
+  if (DB.sessions[S.date] && !confirm(fmtDateFull(S.date) + " 기록이 이미 있습니다. 공유받은 결과로 덮어쓸까요?")) return;
+  viewOnly = false;
+  S.savedAt = Date.now();
+  save();
+  if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+  render();
+  toast("내 기록에 저장했습니다");
 });
 
 /* 페이지를 벗어날 때 미저장 점수 자동 백업 */
@@ -1519,7 +1931,28 @@ function flush(){ if (dirty && S.schedule) save(); }
 window.addEventListener("pagehide", flush);
 d.addEventListener("visibilitychange", function(){ if (d.hidden) flush(); });
 
+function startNewFromView(){
+  viewOnly = false;
+  if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+}
+
 /* ---------------- boot ---------------- */
+// 공유 링크(#v1=...)로 들어왔으면 그 결과를 읽기 전용으로 먼저 보여준다
+function openShared(){
+  var m = /[#&]v1=([A-Za-z0-9\-_]+)/.exec(location.hash || "");
+  if (!m) return false;
+  try {
+    var sess = decodeShare(m[1]);
+    hydrate(sess);
+    viewOnly = true;
+    S.tab = "sched";
+    return true;
+  } catch(e){
+    toast("공유 링크를 읽을 수 없습니다");
+    return false;
+  }
+}
+
 Store.get().then(function(saved){
   if (saved && saved.sessions){
     DB = { sessions: saved.sessions || {}, current: saved.current || null };
@@ -1532,6 +1965,7 @@ Store.get().then(function(saved){
     else { S.count = saved.count; S.games = saved.games || saved.rounds || 4; S.names = saved.names || []; }
     Store.set(DB);
   }
+  openShared();   // 공유 링크가 있으면 그 결과가 우선
   $("#date").value = S.date;
   render();
 });
