@@ -1,0 +1,34 @@
+name: test
+
+# index.html을 실제로 실행해 대진 알고리즘 보장 사항과 UI 동작을 검사한다.
+# 앱은 단일 HTML 파일이고 빌드가 없으므로, 이 워크플로가 유일한 자동 안전망이다.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 의존성 설치 (테스트용 jsdom)
+        run: npm install --no-audit --no-fund
+
+      - name: 색 대비 검사
+        run: npm run contrast
+
+      - name: 대진 생성 알고리즘 전 조합 (약 700개)
+        run: npm run test:algorithm
+
+      - name: 기능 (고정 조 · 등급 · 공유 링크)
+        run: npm run test:features
+
+      - name: UI/UX 동작
+        run: npm run test:ux
