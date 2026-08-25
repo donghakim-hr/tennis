@@ -452,6 +452,17 @@ window.SUPABASE_ANON_KEY = "sb_publishable_X_1Y6-P3pCaFpqdTg32www_RCxpd4DH";
   .room-list button:hover{background:var(--bg)}
   .room-list .rc{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:800;letter-spacing:.06em;color:var(--court)}
   .room-list .rt{font-size:12px;color:var(--muted);margin-left:6px}
+  .admin-tabs{display:flex;gap:6px;margin-top:8px}
+  .admin-tabs .admin-tab{padding:7px 14px;font-size:12.5px}
+  .admin-tabs .admin-tab.on{background:var(--court);color:#fff;border-color:var(--court)}
+  .admin-tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
+  .admin-tbl th,.admin-tbl td{padding:8px 6px;border-bottom:1px solid var(--hair);text-align:left;white-space:nowrap}
+  .admin-tbl th{font-size:11px;color:var(--muted);letter-spacing:.06em;font-weight:800;text-transform:uppercase}
+  .admin-tbl .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:800}
+  .admin-tbl .b-open{background:#e8f4ea;color:#1a7f4b}
+  .admin-tbl .b-closed{background:#f0f2f5;color:var(--muted)}
+  .admin-tbl .b-admin{background:#fdecec;color:#8f2f2f}
+  .admin-scroll{max-height:60vh;overflow:auto;margin-top:8px}
   @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 
@@ -462,6 +473,7 @@ window.SUPABASE_ANON_KEY = "sb_publishable_X_1Y6-P3pCaFpqdTg32www_RCxpd4DH";
     <span class="datechip" id="datechip" hidden></span>
     <span class="prog" id="prog" aria-live="polite"></span>
     <span class="baractions">
+      <button class="btn ghost" id="btn-admin" type="button" hidden>관리자</button>
       <button class="btn ghost" id="btn-room" type="button" hidden>방</button>
       <button class="btn ghost" id="btn-auth" type="button">로그인</button>
     </span>
@@ -619,6 +631,19 @@ window.SUPABASE_ANON_KEY = "sb_publishable_X_1Y6-P3pCaFpqdTg32www_RCxpd4DH";
   </div>
 </div>
 
+<!-- 관리자 모달 -->
+<div class="modal" id="mAdmin" hidden>
+  <div class="modal-card" style="max-width:640px">
+    <button class="modal-close" data-close aria-label="닫기">×</button>
+    <h3>관리자</h3>
+    <div class="admin-tabs">
+      <button class="btn ghost admin-tab on" data-adm="users" type="button">회원</button>
+      <button class="btn ghost admin-tab" data-adm="rooms" type="button">방</button>
+    </div>
+    <div id="mAdmin-body" style="margin-top:12px">불러오는 중…</div>
+  </div>
+</div>
+
 <!-- 방 모달 -->
 <div class="modal" id="mRoom" hidden>
   <div class="modal-card">
@@ -665,9 +690,19 @@ try {
 function setMe(u){
   Me = u;
   try {
-    if (u) window.localStorage.setItem(AUTH_KEY, JSON.stringify({id:u.id, nickname:u.nickname}));
+    if (u) window.localStorage.setItem(AUTH_KEY, JSON.stringify({id:u.id, nickname:u.nickname, is_admin:!!u.is_admin}));
     else   window.localStorage.removeItem(AUTH_KEY);
   } catch(e){}
+}
+
+// 캐시된 로그인 정보가 오래됐을 수 있으니 앱 시작 시 서버에서 is_admin 재확인
+function refreshMeFromServer(){
+  if (!sb || !Me) return Promise.resolve();
+  return sb.from("app_users").select("id,nickname,is_admin").eq("id", Me.id).maybeSingle()
+    .then(function(res){
+      if (res.data) setMe(res.data);
+      else setMe(null);   // 서버에 없는 계정이면 로그아웃
+    })["catch"](function(){ /* 오프라인은 무시 */ });
 }
 
 // SHA-256 해싱 (PIN + salt) — 4자리 PIN이라 salt가 필수
@@ -694,7 +729,7 @@ function signUp(nickname, pin){
   var salt = randSalt();
   return hashPin(pin, salt).then(function(hash){
     return sb.from("app_users").insert({ nickname: nickname, pin_hash: hash, pin_salt: salt })
-      .select().single();
+      .select("id,nickname,is_admin").single();
   }).then(function(res){
     if (res.error){
       if (res.error.code === "23505") throw new Error("이미 쓰는 닉네임입니다");
@@ -708,13 +743,13 @@ function signUp(nickname, pin){
 // 로그인: 닉네임으로 salt 조회 → 해시 비교
 function signIn(nickname, pin){
   if (!sb) return Promise.reject(new Error("Supabase 설정이 없습니다"));
-  return sb.from("app_users").select("id,nickname,pin_hash,pin_salt").eq("nickname", nickname).maybeSingle()
+  return sb.from("app_users").select("id,nickname,pin_hash,pin_salt,is_admin").eq("nickname", nickname).maybeSingle()
     .then(function(res){
       if (res.error) throw new Error(res.error.message);
       if (!res.data)  throw new Error("없는 닉네임입니다");
       return hashPin(pin, res.data.pin_salt).then(function(h){
         if (h !== res.data.pin_hash) throw new Error("PIN이 틀립니다");
-        var u = { id: res.data.id, nickname: res.data.nickname };
+        var u = { id: res.data.id, nickname: res.data.nickname, is_admin: !!res.data.is_admin };
         setMe(u);
         // 마지막 접속 시각 업데이트 (실패해도 무시)
         sb.from("app_users").update({ last_seen_at: new Date().toISOString() }).eq("id", u.id).then(function(){});
@@ -805,11 +840,31 @@ function pushRoomState(){
   sb.from("rooms").update({ state: snapshot() }).eq("code", Room.code).then(function(){});
 }
 
-// 방 닫기 (owner만)
+// 방 닫기 (owner만) — 목록에서 사라지지만 sessions/user_sessions 이력은 보존
 function closeRoom(){
-  if (!sb || !Room.code || !Me) return Promise.resolve();
-  return sb.from("rooms").update({ is_open: false }).eq("code", Room.code).eq("owner_id", Me.id)
-    .then(function(){ leaveRoom(); });
+  if (!sb || !Room.code || !Me) return Promise.reject(new Error("로그인·방 필요"));
+  var code = Room.code;
+  return sb.from("rooms").update({ is_open: false }).eq("code", code).eq("owner_id", Me.id)
+    .select().then(function(res){
+      if (res.error) throw new Error(res.error.message);
+      if (!res.data || !res.data.length) throw new Error("방 주인만 종료할 수 있습니다");
+      leaveRoom();
+    });
+}
+
+/* ---------------- 관리자 전용 ---------------- */
+function listAllUsersAdmin(){
+  if (!sb) return Promise.resolve([]);
+  return sb.from("app_users").select("id,nickname,is_admin,created_at,last_seen_at")
+    .order("created_at", {ascending:false})
+    .then(function(res){ return res.data || []; });
+}
+
+function listAllRoomsAdmin(){
+  if (!sb) return Promise.resolve([]);
+  return sb.from("rooms").select("code,title,owner_id,is_open,created_at,updated_at")
+    .order("created_at", {ascending:false}).limit(200)
+    .then(function(res){ return res.data || []; });
 }
 
 /* ---------------- 세션 이력 (완료된 게임) ---------------- */
@@ -2595,20 +2650,23 @@ Store.get().then(function(saved){
   render();
   bindAuthUI();
   refreshAuthUI();
+  refreshMeFromServer().then(refreshAuthUI);
 });
 
 /* ---------------- 인증·방 UI 바인딩 ---------------- */
 var authMode = "signin";  // 'signin' | 'signup'
 
 function refreshAuthUI(){
-  var btn = $("#btn-auth"), roomBtn = $("#btn-room");
+  var btn = $("#btn-auth"), roomBtn = $("#btn-room"), admBtn = $("#btn-admin");
   if (!btn) return;
   if (Me){
     btn.textContent = Me.nickname + " · 로그아웃";
     if (roomBtn){ roomBtn.hidden = false; roomBtn.textContent = Room.code ? ("방 " + Room.code) : "방"; roomBtn.classList.toggle("on", !!Room.code); }
+    if (admBtn){ admBtn.hidden = !Me.is_admin; }
   } else {
     btn.textContent = "로그인";
     if (roomBtn){ roomBtn.hidden = true; }
+    if (admBtn){ admBtn.hidden = true; }
   }
   // 저장 바의 클라우드 저장 버튼 상태도 갱신
   renderSaveBar();
@@ -2651,9 +2709,27 @@ function openRoomModal(){
   var cur = $("#mRoom-current");
   if (Room.code){
     cur.hidden = false;
+    // owner 확인 위해 room 정보 조회
     cur.innerHTML = "현재 접속: <b>" + Room.code + "</b> " +
-      '<button class="btn ghost" id="mRoom-leave" type="button" style="margin-left:auto;padding:6px 10px;font-size:12px">나가기</button>';
+      '<button class="btn ghost" id="mRoom-leave" type="button" style="margin-left:auto;padding:6px 10px;font-size:12px">나가기</button>' +
+      '<button class="btn ghost" id="mRoom-close" type="button" hidden style="padding:6px 10px;font-size:12px;color:#8f2f2f">방 종료</button>';
     $("#mRoom-leave").addEventListener("click", function(){ leaveRoom(); openRoomModal(); toast("방에서 나갔습니다"); });
+    // 방 종료 버튼: owner만 노출
+    if (sb && Me){
+      sb.from("rooms").select("owner_id").eq("code", Room.code).maybeSingle().then(function(res){
+        if (res.data && res.data.owner_id === Me.id){
+          var btn = $("#mRoom-close");
+          if (btn){
+            btn.hidden = false;
+            btn.addEventListener("click", function(){
+              if (!confirm("방을 종료하면 목록에서 사라지고, 이력에서만 확인할 수 있습니다. 진행할까요?")) return;
+              closeRoom().then(function(){ closeRoomModal(); refreshAuthUI(); toast("방 종료됨"); })
+                ["catch"](function(e){ $("#mRoom-err").textContent = e.message; });
+            });
+          }
+        }
+      });
+    }
   } else { cur.hidden = true; }
   $("#mRoom").hidden = false;
   refreshRoomList();
@@ -2722,11 +2798,84 @@ function loadCloudHistory(){
   });
 }
 
+/* ---------------- 관리자 모달 ---------------- */
+var adminTab = "users";
+function openAdminModal(){
+  if (!Me || !Me.is_admin) return;
+  adminTab = "users";
+  d.querySelectorAll(".admin-tab").forEach(function(b){ b.classList.toggle("on", b.dataset.adm === "users"); });
+  $("#mAdmin").hidden = false;
+  loadAdminSection();
+}
+function closeAdminModal(){ $("#mAdmin").hidden = true; }
+
+function loadAdminSection(){
+  var host = $("#mAdmin-body");
+  host.textContent = "불러오는 중…";
+  if (adminTab === "users"){
+    listAllUsersAdmin().then(function(rows){
+      if (!rows.length){ host.innerHTML = '<p class="empty">회원이 없습니다</p>'; return; }
+      var body = rows.map(function(u){
+        return "<tr>" +
+          "<td>" + esc(u.nickname) + (u.is_admin ? ' <span class="badge b-admin">ADMIN</span>' : "") + "</td>" +
+          "<td>" + fmtDateFull(u.created_at.slice(0,10)) + "</td>" +
+          "<td>" + (u.last_seen_at ? new Date(u.last_seen_at).toLocaleString() : "-") + "</td>" +
+        "</tr>";
+      }).join("");
+      host.innerHTML = '<div class="admin-scroll"><table class="admin-tbl">' +
+        '<thead><tr><th>닉네임</th><th>가입일</th><th>마지막 접속</th></tr></thead>' +
+        '<tbody>' + body + '</tbody></table></div>' +
+        '<p class="mAuth-hint" style="margin-top:10px">총 ' + rows.length + '명</p>';
+    })["catch"](function(e){ host.innerHTML = '<p class="mAuth-err">' + esc(e.message||e) + '</p>'; });
+  } else {
+    listAllRoomsAdmin().then(function(rows){
+      if (!rows.length){ host.innerHTML = '<p class="empty">방이 없습니다</p>'; return; }
+      // owner_id → nickname 매핑 (한 번에 조회)
+      var ownerIds = rows.map(function(r){return r.owner_id;}).filter(Boolean);
+      var uniq = ownerIds.filter(function(v,i,a){return a.indexOf(v)===i;});
+      var ownerP = uniq.length
+        ? sb.from("app_users").select("id,nickname").in("id", uniq).then(function(res){
+            var map = {}; (res.data||[]).forEach(function(u){ map[u.id] = u.nickname; }); return map;
+          })
+        : Promise.resolve({});
+      ownerP.then(function(nickMap){
+        var body = rows.map(function(r){
+          var owner = r.owner_id ? (nickMap[r.owner_id] || "?") : "(없음)";
+          var badge = r.is_open
+            ? '<span class="badge b-open">진행중</span>'
+            : '<span class="badge b-closed">종료</span>';
+          return "<tr>" +
+            "<td><span class='rc' style='font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:800'>" + r.code + "</span></td>" +
+            "<td>" + esc(r.title || "-") + "</td>" +
+            "<td>" + esc(owner) + "</td>" +
+            "<td>" + badge + "</td>" +
+            "<td>" + new Date(r.updated_at).toLocaleString() + "</td>" +
+          "</tr>";
+        }).join("");
+        host.innerHTML = '<div class="admin-scroll"><table class="admin-tbl">' +
+          '<thead><tr><th>코드</th><th>제목</th><th>방주</th><th>상태</th><th>업데이트</th></tr></thead>' +
+          '<tbody>' + body + '</tbody></table></div>' +
+          '<p class="mAuth-hint" style="margin-top:10px">총 ' + rows.length + '개 (진행중 ' +
+            rows.filter(function(r){return r.is_open;}).length + ')</p>';
+      });
+    })["catch"](function(e){ host.innerHTML = '<p class="mAuth-err">' + esc(e.message||e) + '</p>'; });
+  }
+}
+
 function bindAuthUI(){
   $("#btn-auth").addEventListener("click", function(){
     if (Me){
       if (confirm(Me.nickname + " 로그아웃 하시겠어요?")){ signOut(); refreshAuthUI(); if (S.tab === "history") renderHistory(); toast("로그아웃"); }
     } else { openAuthModal(); }
+  });
+  $("#btn-admin").addEventListener("click", openAdminModal);
+  // 관리자 탭 전환
+  d.querySelectorAll(".admin-tab").forEach(function(b){
+    b.addEventListener("click", function(){
+      adminTab = this.dataset.adm;
+      d.querySelectorAll(".admin-tab").forEach(function(x){ x.classList.toggle("on", x.dataset.adm === adminTab); });
+      loadAdminSection();
+    });
   });
   $("#btn-room").addEventListener("click", function(){
     if (!Me){ openAuthModal(); return; }
