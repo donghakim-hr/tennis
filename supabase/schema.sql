@@ -9,9 +9,12 @@ create table if not exists app_users (
   nickname     text        not null unique,
   pin_hash     text        not null,                         -- SHA-256 + salt
   pin_salt     text        not null,
+  is_admin     boolean     not null default false,
   created_at   timestamptz not null default now(),
   last_seen_at timestamptz not null default now()
 );
+-- 기존 사용자를 위한 안전한 컬럼 추가 (schema.sql 재실행 시)
+alter table app_users add column if not exists is_admin boolean not null default false;
 
 create index if not exists idx_app_users_nickname on app_users (nickname);
 

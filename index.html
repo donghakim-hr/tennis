@@ -695,13 +695,23 @@ function setMe(u){
   } catch(e){}
 }
 
-// 캐시된 로그인 정보가 오래됐을 수 있으니 앱 시작 시 서버에서 is_admin 재확인
+// 서버에서 is_admin 조회 (컬럼이 없어도 false로 그레이스풀 처리)
+function fetchIsAdmin(userId){
+  if (!sb || !userId) return Promise.resolve(false);
+  return sb.from("app_users").select("is_admin").eq("id", userId).maybeSingle()
+    .then(function(res){ return !!(res.data && res.data.is_admin); })
+    ["catch"](function(){ return false; });
+}
+
+// 앱 시작 시 서버에서 사용자·admin 재확인
 function refreshMeFromServer(){
   if (!sb || !Me) return Promise.resolve();
-  return sb.from("app_users").select("id,nickname,is_admin").eq("id", Me.id).maybeSingle()
+  return sb.from("app_users").select("id,nickname").eq("id", Me.id).maybeSingle()
     .then(function(res){
-      if (res.data) setMe(res.data);
-      else setMe(null);   // 서버에 없는 계정이면 로그아웃
+      if (!res.data){ setMe(null); return; }   // 서버에 없는 계정이면 로그아웃
+      return fetchIsAdmin(res.data.id).then(function(isAdmin){
+        setMe({ id: res.data.id, nickname: res.data.nickname, is_admin: isAdmin });
+      });
     })["catch"](function(){ /* 오프라인은 무시 */ });
 }
 
@@ -729,31 +739,36 @@ function signUp(nickname, pin){
   var salt = randSalt();
   return hashPin(pin, salt).then(function(hash){
     return sb.from("app_users").insert({ nickname: nickname, pin_hash: hash, pin_salt: salt })
-      .select("id,nickname,is_admin").single();
+      .select("id,nickname").single();
   }).then(function(res){
     if (res.error){
       if (res.error.code === "23505") throw new Error("이미 쓰는 닉네임입니다");
       throw new Error(res.error.message);
     }
-    setMe(res.data);
-    return res.data;
+    return fetchIsAdmin(res.data.id).then(function(isAdmin){
+      var u = { id: res.data.id, nickname: res.data.nickname, is_admin: isAdmin };
+      setMe(u);
+      return u;
+    });
   });
 }
 
-// 로그인: 닉네임으로 salt 조회 → 해시 비교
+// 로그인: 닉네임으로 salt 조회 → 해시 비교 (is_admin은 별도 조회, 컬럼 없어도 false)
 function signIn(nickname, pin){
   if (!sb) return Promise.reject(new Error("Supabase 설정이 없습니다"));
-  return sb.from("app_users").select("id,nickname,pin_hash,pin_salt,is_admin").eq("nickname", nickname).maybeSingle()
+  return sb.from("app_users").select("id,nickname,pin_hash,pin_salt").eq("nickname", nickname).maybeSingle()
     .then(function(res){
       if (res.error) throw new Error(res.error.message);
       if (!res.data)  throw new Error("없는 닉네임입니다");
       return hashPin(pin, res.data.pin_salt).then(function(h){
         if (h !== res.data.pin_hash) throw new Error("PIN이 틀립니다");
-        var u = { id: res.data.id, nickname: res.data.nickname, is_admin: !!res.data.is_admin };
-        setMe(u);
-        // 마지막 접속 시각 업데이트 (실패해도 무시)
-        sb.from("app_users").update({ last_seen_at: new Date().toISOString() }).eq("id", u.id).then(function(){});
-        return u;
+        return fetchIsAdmin(res.data.id).then(function(isAdmin){
+          var u = { id: res.data.id, nickname: res.data.nickname, is_admin: isAdmin };
+          setMe(u);
+          // 마지막 접속 시각 업데이트 (실패해도 무시)
+          sb.from("app_users").update({ last_seen_at: new Date().toISOString() }).eq("id", u.id).then(function(){});
+          return u;
+        });
       });
     });
 }
@@ -855,9 +870,18 @@ function closeRoom(){
 /* ---------------- 관리자 전용 ---------------- */
 function listAllUsersAdmin(){
   if (!sb) return Promise.resolve([]);
-  return sb.from("app_users").select("id,nickname,is_admin,created_at,last_seen_at")
+  // is_admin 컬럼이 있는지 모르니 * 로 조회 (없으면 undefined 처리)
+  return sb.from("app_users").select("id,nickname,created_at,last_seen_at,is_admin")
     .order("created_at", {ascending:false})
-    .then(function(res){ return res.data || []; });
+    .then(function(res){
+      if (res.error){
+        // 마이그레이션 전이라 is_admin 컬럼이 없을 수 있음 → is_admin 없이 재시도
+        return sb.from("app_users").select("id,nickname,created_at,last_seen_at")
+          .order("created_at", {ascending:false})
+          .then(function(r2){ return (r2.data || []).map(function(u){ u.is_admin = false; return u; }); });
+      }
+      return res.data || [];
+    });
 }
 
 function listAllRoomsAdmin(){
