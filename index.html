@@ -62,8 +62,14 @@ window.SUPABASE_ANON_KEY = "sb_publishable_X_1Y6-P3pCaFpqdTg32www_RCxpd4DH";
   .mark::before{clip-path:inset(0 60% 0 0)}
   .mark::after{clip-path:inset(0 0 0 60%)}
   h1{
-    font-size:15px;margin:0;font-weight:800;letter-spacing:-.02em;flex:1 1 auto;
+    font-size:15px;margin:0;font-weight:800;letter-spacing:-.02em;
   }
+  .home-link{
+    display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink);
+    flex:1 1 auto;min-width:0;cursor:pointer;padding:2px 0;border-radius:8px;
+  }
+  .home-link:hover h1{color:var(--court)}
+  .home-link:focus-visible{outline:2px solid var(--court);outline-offset:2px}
   .prog{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;font-weight:600}
   .tabs{max-width:760px;margin:0 auto;padding:4px 14px 0;display:flex;gap:8px}
   .tab{
@@ -468,13 +474,15 @@ window.SUPABASE_ANON_KEY = "sb_publishable_X_1Y6-P3pCaFpqdTg32www_RCxpd4DH";
 
 <header>
   <div class="bar">
-    <span class="mark" aria-hidden="true"></span>
-    <h1>테니스 복식 매칭</h1>
+    <a href="#" class="home-link" id="btn-home" aria-label="홈으로">
+      <span class="mark" aria-hidden="true"></span>
+      <h1>테니스 매칭</h1>
+    </a>
     <span class="datechip" id="datechip" hidden></span>
     <span class="prog" id="prog" aria-live="polite"></span>
     <span class="baractions">
       <button class="btn ghost" id="btn-admin" type="button" hidden>관리자</button>
-      <button class="btn ghost" id="btn-room" type="button" hidden>방</button>
+      <button class="btn ghost" id="btn-room" type="button" hidden>코트</button>
       <button class="btn ghost" id="btn-auth" type="button">로그인</button>
     </span>
   </div>
@@ -638,24 +646,24 @@ window.SUPABASE_ANON_KEY = "sb_publishable_X_1Y6-P3pCaFpqdTg32www_RCxpd4DH";
     <h3>관리자</h3>
     <div class="admin-tabs">
       <button class="btn ghost admin-tab on" data-adm="users" type="button">회원</button>
-      <button class="btn ghost admin-tab" data-adm="rooms" type="button">방</button>
+      <button class="btn ghost admin-tab" data-adm="rooms" type="button">코트</button>
     </div>
     <div id="mAdmin-body" style="margin-top:12px">불러오는 중…</div>
   </div>
 </div>
 
-<!-- 방 모달 -->
+<!-- 코트(방) 모달 -->
 <div class="modal" id="mRoom" hidden>
   <div class="modal-card">
     <button class="modal-close" data-close aria-label="닫기">×</button>
-    <h3 id="mRoom-title">방</h3>
+    <h3 id="mRoom-title">코트</h3>
     <div id="mRoom-current" hidden class="room-cur"></div>
     <div class="room-actions">
-      <button class="btn" id="mRoom-create" type="button">현재 대진표로 방 만들기</button>
-      <label class="row-in">방 코드로 접속 <input id="mRoom-code" maxlength="6" placeholder="예: K3M7X2" style="text-transform:uppercase"></label>
+      <button class="btn" id="mRoom-create" type="button">현재 대진표로 코트 만들기</button>
+      <label class="row-in">코트 코드로 접속 <input id="mRoom-code" maxlength="6" placeholder="예: K3M7X2" style="text-transform:uppercase"></label>
       <button class="btn ghost" id="mRoom-join" type="button">코드로 접속</button>
     </div>
-    <p class="eyebrow" style="margin-top:16px">지금 열려있는 방</p>
+    <p class="eyebrow" style="margin-top:16px">지금 열려있는 코트</p>
     <div id="mRoom-list" class="room-list"></div>
     <div class="mAuth-err" id="mRoom-err"></div>
   </div>
@@ -821,7 +829,7 @@ function joinRoom(code){
   return sb.from("rooms").select("state,title,owner_id").eq("code", code).maybeSingle()
     .then(function(res){
       if (res.error) throw new Error(res.error.message);
-      if (!res.data)  throw new Error("없는 방입니다");
+      if (!res.data)  throw new Error("없는 코트입니다");
       // 원격 상태를 로컬에 반영
       Room.suppressSync = true;
       try { hydrate(res.data.state); } finally { Room.suppressSync = false; }
@@ -857,12 +865,12 @@ function pushRoomState(){
 
 // 방 닫기 (owner만) — 목록에서 사라지지만 sessions/user_sessions 이력은 보존
 function closeRoom(){
-  if (!sb || !Room.code || !Me) return Promise.reject(new Error("로그인·방 필요"));
+  if (!sb || !Room.code || !Me) return Promise.reject(new Error("로그인·코트 필요"));
   var code = Room.code;
   return sb.from("rooms").update({ is_open: false }).eq("code", code).eq("owner_id", Me.id)
     .select().then(function(res){
       if (res.error) throw new Error(res.error.message);
-      if (!res.data || !res.data.length) throw new Error("방 주인만 종료할 수 있습니다");
+      if (!res.data || !res.data.length) throw new Error("코트 주인만 종료할 수 있습니다");
       leaveRoom();
     });
 }
@@ -1614,7 +1622,7 @@ function toast(msg){
 }
 
 /* ---------------- intro (종목 선택) ---------------- */
-var introStep = 1;   // 1: 단식/복식, 2: 동성/혼성
+var introStep = 0;   // 0: 코트 목록(랜딩), 1: 단식/복식, 2: 동성/혼성
 
 function modeLabel(sess){
   if (sess.mode === "single") return "단식";
@@ -1633,17 +1641,30 @@ function dots(kind){
 
 function renderIntro(){
   var host = $("#intro");
-  var errBox = shareErr
-    ? '<div class="warnbox" style="margin-bottom:16px">공유 링크를 읽을 수 없습니다. 메신저가 긴 주소를 잘랐을 수 있어요 — '
-      + '단톡방에서 링크 전체를 다시 복사해 붙여주세요. 직접 대진을 만들려면 아래에서 종목을 고르세요.</div>'
-    : "";
+
+  // Step 0: 랜딩 — 진행중인 코트 목록 + 새 코트 만들기
+  if (introStep === 0){
+    var errBox = shareErr
+      ? '<div class="warnbox" style="margin-bottom:16px">공유 링크를 읽을 수 없습니다. 단톡방에서 링크 전체를 다시 복사해 붙여주세요.</div>'
+      : "";
+    host.innerHTML = errBox +
+      '<h2>테니스 매칭</h2>' +
+      '<p class="lead">진행중인 코트에 접속하거나, 새 코트를 만들어 대진을 짜세요.</p>' +
+      '<p class="eyebrow" style="margin:20px 0 8px">진행중인 코트</p>' +
+      '<div id="intro-courts"><div class="card"><p class="empty">불러오는 중…</p></div></div>' +
+      '<div style="margin-top:20px"><button class="btn primary" id="intro-new" style="width:100%;padding:16px;font-size:15px">＋ 새 코트 만들기</button></div>';
+    $("#intro-new").addEventListener("click", function(){ introStep = 1; renderIntro(); });
+    loadIntroCourts();
+    return;
+  }
+
   var opts = introStep === 1
     ? [{ k:"single", t:"단식", d:"1 대 1 · 코트당 2명" },
        { k:"double", t:"복식", d:"2 대 2 · 코트당 4명" }]
     : [{ k:"same",  t:"동성 복식", d:"성별 구분 없이 팀 구성" },
        { k:"mixed", t:"혼성 복식", d:"모든 팀을 남 1명 · 여 1명으로" }];
 
-  host.innerHTML = errBox +
+  host.innerHTML =
     '<h2>' + (introStep === 1 ? "어떤 경기를 하시나요?" : "복식 방식을 골라주세요") + '</h2>' +
     '<p class="lead">' + (introStep === 1
       ? "종목에 따라 코트 정원과 대진 방식이 달라집니다."
@@ -1655,7 +1676,8 @@ function renderIntro(){
         '<span class="pick-d">' + o.d + '</span></span>' +
       '</button>';
     }).join("") + '</div>' +
-    (introStep === 2 ? '<div class="intro-back"><button class="btn ghost" id="intro-back" style="width:100%">← 단식·복식 다시 고르기</button></div>' : "");
+    '<div class="intro-back" style="margin-top:12px"><button class="btn ghost" id="intro-back" style="width:100%">' +
+      (introStep === 2 ? "← 단식·복식 다시 고르기" : "← 코트 목록으로") + '</button></div>';
 
   Array.prototype.forEach.call(host.querySelectorAll(".pick"), function(b){
     b.addEventListener("click", function(){
@@ -1665,11 +1687,45 @@ function renderIntro(){
       else { S.mode = "double"; S.pair = k; finishIntro(); }
     });
   });
-  if ($("#intro-back")) $("#intro-back").addEventListener("click", function(){ introStep = 1; renderIntro(); });
+  $("#intro-back").addEventListener("click", function(){
+    introStep = (introStep === 2) ? 1 : 0;
+    renderIntro();
+  });
+}
+
+// 랜딩 페이지의 진행중 코트 목록 로드
+function loadIntroCourts(){
+  var host = $("#intro-courts");
+  if (!host) return;
+  if (!sb){
+    host.innerHTML = '<div class="card"><p class="empty">Supabase 미설정 — 로컬 모드로만 동작합니다</p></div>';
+    return;
+  }
+  listOpenRooms(20).then(function(rows){
+    if (!rows.length){
+      host.innerHTML = '<div class="card"><p class="empty">지금 열려있는 코트가 없습니다. 아래 <b>새 코트 만들기</b>로 시작하세요.</p></div>';
+      return;
+    }
+    host.innerHTML = '<div class="card"><div class="room-list" style="max-height:none">' + rows.map(function(r){
+      var title = r.title ? " <span class='rt'>· " + esc(r.title) + "</span>" : "";
+      var when  = r.updated_at ? " <span class='rt'>· " + new Date(r.updated_at).toLocaleString() + "</span>" : "";
+      return '<button data-code="' + r.code + '"><span class="rc">' + r.code + '</span>' + title + when + '</button>';
+    }).join("") + '</div></div>';
+    host.querySelectorAll("button[data-code]").forEach(function(b){
+      b.addEventListener("click", function(){
+        var code = this.dataset.code;
+        if (!Me){ toast("먼저 로그인이 필요합니다"); openAuthModal(); return; }
+        joinRoom(code).then(function(){ toast("코트 " + code + " 접속"); refreshAuthUI(); })
+          ["catch"](function(e){ toast(e.message || e); });
+      });
+    });
+  })["catch"](function(){
+    host.innerHTML = '<div class="card"><p class="empty">코트 목록을 불러올 수 없습니다</p></div>';
+  });
 }
 
 function finishIntro(){
-  introStep = 1;
+  introStep = 0;
   courtTouched = false;
   S.schedule = null; DB.current = null; S.savedAt = null; dirty = false;
   var mn = minPlayers(S.mode);
@@ -2503,7 +2559,7 @@ $("#mode-change").addEventListener("click", function(){
   startNewFromView();
   scrollMem = {};
   S.schedule = null; DB.current = null; S.savedAt = null; dirty = false;
-  introStep = 1; S.mode = null; S.tab = "sched";
+  introStep = 1; S.mode = null; S.tab = "sched";   // 종목 다시 고르기는 랜딩 건너뛰고 바로 종목 픽커로
   render(); window.scrollTo({top:0});
 });
 $("#date").addEventListener("change", function(){ S.date = this.value || todayStr(); renderSetup(); save(); });
@@ -2703,7 +2759,7 @@ function refreshAuthUI(){
   if (!btn) return;
   if (Me){
     btn.textContent = Me.nickname + " · 로그아웃";
-    if (roomBtn){ roomBtn.hidden = false; roomBtn.textContent = Room.code ? ("방 " + Room.code) : "방"; roomBtn.classList.toggle("on", !!Room.code); }
+    if (roomBtn){ roomBtn.hidden = false; roomBtn.textContent = Room.code ? ("코트 " + Room.code) : "코트"; roomBtn.classList.toggle("on", !!Room.code); }
     if (admBtn){ admBtn.hidden = !Me.is_admin; }
   } else {
     btn.textContent = "로그인";
@@ -2754,9 +2810,9 @@ function openRoomModal(){
     // owner 확인 위해 room 정보 조회
     cur.innerHTML = "현재 접속: <b>" + Room.code + "</b> " +
       '<button class="btn ghost" id="mRoom-leave" type="button" style="margin-left:auto;padding:6px 10px;font-size:12px">나가기</button>' +
-      '<button class="btn ghost" id="mRoom-close" type="button" hidden style="padding:6px 10px;font-size:12px;color:#8f2f2f">방 종료</button>';
-    $("#mRoom-leave").addEventListener("click", function(){ leaveRoom(); openRoomModal(); toast("방에서 나갔습니다"); });
-    // 방 종료 버튼: owner만 노출
+      '<button class="btn ghost" id="mRoom-close" type="button" hidden style="padding:6px 10px;font-size:12px;color:#8f2f2f">코트 종료</button>';
+    $("#mRoom-leave").addEventListener("click", function(){ leaveRoom(); openRoomModal(); toast("코트에서 나갔습니다"); });
+    // 코트 종료 버튼: owner만 노출
     if (sb && Me){
       sb.from("rooms").select("owner_id").eq("code", Room.code).maybeSingle().then(function(res){
         if (res.data && res.data.owner_id === Me.id){
@@ -2764,8 +2820,8 @@ function openRoomModal(){
           if (btn){
             btn.hidden = false;
             btn.addEventListener("click", function(){
-              if (!confirm("방을 종료하면 목록에서 사라지고, 이력에서만 확인할 수 있습니다. 진행할까요?")) return;
-              closeRoom().then(function(){ closeRoomModal(); refreshAuthUI(); toast("방 종료됨"); })
+              if (!confirm("코트를 종료하면 목록에서 사라지고, 이력에서만 확인할 수 있습니다. 진행할까요?")) return;
+              closeRoom().then(function(){ closeRoomModal(); refreshAuthUI(); toast("코트 종료됨"); })
                 ["catch"](function(e){ $("#mRoom-err").textContent = e.message; });
             });
           }
@@ -2782,7 +2838,7 @@ function refreshRoomList(){
   var host = $("#mRoom-list");
   host.innerHTML = "<span style='color:var(--muted);font-size:12.5px'>불러오는 중…</span>";
   listOpenRooms(20).then(function(rows){
-    if (!rows.length){ host.innerHTML = "<span style='color:var(--muted);font-size:12.5px'>열려있는 방이 없어요</span>"; return; }
+    if (!rows.length){ host.innerHTML = "<span style='color:var(--muted);font-size:12.5px'>열려있는 코트가 없어요</span>"; return; }
     host.innerHTML = "";
     rows.forEach(function(r){
       var b = d.createElement("button");
@@ -2791,7 +2847,7 @@ function refreshRoomList(){
       var ago   = when ? " <span class='rt'>· " + when.toLocaleString() + "</span>" : "";
       b.innerHTML = "<span class='rc'>" + r.code + "</span>" + title + ago;
       b.addEventListener("click", function(){
-        joinRoom(r.code).then(function(){ closeRoomModal(); refreshAuthUI(); toast("방 " + r.code + " 접속"); })
+        joinRoom(r.code).then(function(){ closeRoomModal(); refreshAuthUI(); toast("코트 " + r.code + " 접속"); })
           ["catch"](function(e){ $("#mRoom-err").textContent = e.message; });
       });
       host.appendChild(b);
@@ -2805,7 +2861,7 @@ function loadCloudHistory(){
   if (!host) return;
   listMySessions(30).then(function(rows){
     if (!rows.length){
-      host.innerHTML = '<div class="card"><p class="empty">클라우드에 저장된 세션이 없습니다. 대진표 화면에서 <b>내 이력에 저장</b> 버튼을 눌러 저장하세요.</p></div>';
+      host.innerHTML = '<div class="card"><p class="empty">저장된 이력이 없습니다. 대진표 화면에서 <b>내 이력에 저장</b> 버튼을 눌러 저장하세요.</p></div>';
       return;
     }
     host.innerHTML = '<div class="hist">' + rows.map(function(s){
@@ -2814,7 +2870,7 @@ function loadCloudHistory(){
       var meta = (snap.count ? snap.count + "명" : "?명")
         + (snap.schedule ? " · " + snap.schedule.length + "라운드" : "")
         + " · " + pr.done + "/" + pr.all + "경기 입력"
-        + (s.room_code ? " · 방 " + s.room_code : " · 솔로");
+        + (s.room_code ? " · 코트 " + s.room_code : " · 솔로");
       return '<div class="hist-item">' +
         '<button class="hist-open" data-sid="' + s.id + '">' +
           '<div class="hist-d">' + fmtDateFull(s.played_on) + '</div>' +
@@ -2871,7 +2927,7 @@ function loadAdminSection(){
     })["catch"](function(e){ host.innerHTML = '<p class="mAuth-err">' + esc(e.message||e) + '</p>'; });
   } else {
     listAllRoomsAdmin().then(function(rows){
-      if (!rows.length){ host.innerHTML = '<p class="empty">방이 없습니다</p>'; return; }
+      if (!rows.length){ host.innerHTML = '<p class="empty">코트가 없습니다</p>'; return; }
       // owner_id → nickname 매핑 (한 번에 조회)
       var ownerIds = rows.map(function(r){return r.owner_id;}).filter(Boolean);
       var uniq = ownerIds.filter(function(v,i,a){return a.indexOf(v)===i;});
@@ -2899,7 +2955,7 @@ function loadAdminSection(){
           "</tr>";
         }).join("");
         host.innerHTML = '<div class="admin-scroll"><table class="admin-tbl">' +
-          '<thead><tr><th>코드</th><th>제목</th><th>방주</th><th>상태</th><th>업데이트</th><th></th></tr></thead>' +
+          '<thead><tr><th>코드</th><th>제목</th><th>코트주</th><th>상태</th><th>업데이트</th><th></th></tr></thead>' +
           '<tbody>' + body + '</tbody></table></div>' +
           '<p class="mAuth-hint" style="margin-top:10px">총 ' + rows.length + '개 (진행중 ' +
             rows.filter(function(r){return r.is_open;}).length + ')</p>';
@@ -2908,16 +2964,16 @@ function loadAdminSection(){
         host.querySelectorAll(".adm-close").forEach(function(b){
           b.addEventListener("click", function(){
             var code = this.dataset.code;
-            if (!confirm("방 " + code + " 을 강제 종료할까요? (목록에서 사라지며 이력만 남습니다)")) return;
-            adminCloseRoom(code).then(function(){ toast("방 " + code + " 종료됨"); loadAdminSection(); refreshAuthUI(); })
+            if (!confirm("코트 " + code + " 을 강제 종료할까요? (목록에서 사라지며 이력만 남습니다)")) return;
+            adminCloseRoom(code).then(function(){ toast("코트 " + code + " 종료됨"); loadAdminSection(); refreshAuthUI(); })
               ["catch"](function(e){ alert("실패: " + e.message); });
           });
         });
         host.querySelectorAll(".adm-del").forEach(function(b){
           b.addEventListener("click", function(){
             var code = this.dataset.code;
-            if (!confirm("방 " + code + " 을 완전 삭제할까요? (되돌릴 수 없습니다. 세션 이력은 보존됩니다)")) return;
-            adminDeleteRoom(code).then(function(){ toast("방 " + code + " 삭제됨"); loadAdminSection(); refreshAuthUI(); })
+            if (!confirm("코트 " + code + " 를 완전 삭제할까요? (되돌릴 수 없습니다. 세션 이력은 보존됩니다)")) return;
+            adminDeleteRoom(code).then(function(){ toast("코트 " + code + " 삭제됨"); loadAdminSection(); refreshAuthUI(); })
               ["catch"](function(e){ alert("실패: " + e.message); });
           });
         });
@@ -2927,6 +2983,18 @@ function loadAdminSection(){
 }
 
 function bindAuthUI(){
+  // 홈: 코트 목록 랜딩으로 복귀 (진행 중이면 확인)
+  $("#btn-home").addEventListener("click", function(e){
+    e.preventDefault();
+    if (S.schedule && dirty && !confirm("입력한 점수가 저장되지 않았습니다. 홈으로 이동할까요?")) return;
+    if (Room.channel){ leaveRoom(); }
+    startNewFromView();
+    scrollMem = {};
+    S.schedule = null; S.mode = null; S.tab = "sched";
+    introStep = 0;
+    render(); refreshAuthUI();
+    window.scrollTo({top:0});
+  });
   $("#btn-auth").addEventListener("click", function(){
     if (Me){
       if (confirm(Me.nickname + " 로그아웃 하시겠어요?")){ signOut(); refreshAuthUI(); if (S.tab === "history") renderHistory(); toast("로그아웃"); }
@@ -2981,16 +3049,16 @@ function bindAuthUI(){
   // 방 폼
   $("#mRoom-create").addEventListener("click", function(){
     if (!S.schedule || !S.schedule.length){ $("#mRoom-err").textContent = "대진표를 먼저 만드세요"; return; }
-    var t = prompt("방 제목 (선택)", "") || "";
+    var t = prompt("코트 제목 (선택)", "") || "";
     createRoom(t).then(function(code){
       closeRoomModal(); refreshAuthUI();
-      toast("방 " + code + " 생성 완료");
+      toast("코트 " + code + " 생성 완료");
     })["catch"](function(e){ $("#mRoom-err").textContent = e.message; });
   });
   $("#mRoom-join").addEventListener("click", function(){
     var c = $("#mRoom-code").value.trim().toUpperCase();
     if (c.length !== 6){ $("#mRoom-err").textContent = "6자리 코드"; return; }
-    joinRoom(c).then(function(){ closeRoomModal(); refreshAuthUI(); toast("방 " + c + " 접속"); })
+    joinRoom(c).then(function(){ closeRoomModal(); refreshAuthUI(); toast("코트 " + c + " 접속"); })
       ["catch"](function(e){ $("#mRoom-err").textContent = e.message; });
   });
   $("#mRoom-code").addEventListener("keydown", function(e){ if (e.key === "Enter") $("#mRoom-join").click(); });

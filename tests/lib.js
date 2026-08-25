@@ -26,8 +26,11 @@ const fire = (w, el, type) => el.dispatchEvent(new w.Event(type, { bubbles: true
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // 종목 선택 화면 통과 — kind: "single" | "same" | "mixed"
+// 진입 시 랜딩(코트 목록)이 보이면 먼저 '새 코트 만들기'로 종목 픽커로 이동
 function pickMode(ctx, kind) {
   const { w, d, $$ } = ctx;
+  const newCourt = $$("#intro button").find(b => /새 코트 만들기/.test(b.textContent));
+  if (newCourt) click(w, newCourt);
   const step1 = $$("#intro button").find(b => new RegExp(kind === "single" ? "단식" : "복식").test(b.textContent));
   click(w, step1);
   if (kind !== "single") {
