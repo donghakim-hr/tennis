@@ -103,6 +103,10 @@ create policy "insert user_sess" on user_sessions for insert with check (true);
 create policy "update rooms"    on rooms      for update using (true) with check (true);
 create policy "update app_users" on app_users for update using (true) with check (true);
 
+-- 방 삭제 (앱에서 admin 체크 후 호출)
+drop policy if exists "delete rooms" on rooms;
+create policy "delete rooms" on rooms for delete using (true);
+
 -- ============================================================================
 -- 7. Realtime 활성화
 -- Dashboard → Database → Replication 에서 rooms 테이블 Realtime 켜기
