@@ -596,6 +596,7 @@ window.SUPABASE_ANON_KEY = "sb_publishable_X_1Y6-P3pCaFpqdTg32www_RCxpd4DH";
 <div class="savebar" id="savebar" hidden>
   <div class="savebar-in">
     <span class="savemsg" id="savemsg"></span>
+    <button class="btn ghost" id="cloud-save-btn" type="button" hidden>내 이력에 저장</button>
     <button class="btn primary" id="save-btn">결과 저장</button>
   </div>
 </div>
@@ -812,29 +813,70 @@ function closeRoom(){
 }
 
 /* ---------------- 세션 이력 (완료된 게임) ---------------- */
-function saveSession(){
-  if (!sb || !Me) return Promise.resolve();
+// 방에 있으면 (room_code, played_on)이 같은 세션을 재사용, 없으면 새로 만든다.
+// 어느 경우든 user_sessions에 나-세션 링크를 upsert.
+function saveSession(playerName){
+  if (!sb || !Me) return Promise.reject(new Error("로그인이 필요합니다"));
   var snap = snapshot();
-  if (!snap.schedule || !snap.schedule.length) return Promise.resolve();
+  if (!snap.schedule || !snap.schedule.length) return Promise.reject(new Error("대진표가 없습니다"));
+  var name = (playerName || Me.nickname).slice(0, 20);
+
+  function link(sessId){
+    return sb.from("user_sessions")
+      .upsert({ user_id: Me.id, session_id: sessId, player_name: name },
+              { onConflict: "user_id,session_id" })
+      .then(function(){ return sessId; });
+  }
+
+  // 방에 있으면 기존 세션 재사용
+  if (Room.code){
+    return sb.from("sessions").select("id")
+      .eq("room_code", Room.code).eq("played_on", snap.date)
+      .order("created_at", {ascending:false}).limit(1).maybeSingle()
+      .then(function(res){
+        if (res.data){
+          // 스냅샷 업데이트 (최신 점수 반영)
+          return sb.from("sessions").update({ snapshot: snap }).eq("id", res.data.id)
+            .then(function(){ return link(res.data.id); });
+        }
+        // 없으면 새로 만들기
+        return sb.from("sessions").insert({
+          room_code: Room.code, played_on: snap.date, snapshot: snap
+        }).select().single().then(function(r){
+          if (r.error) throw new Error(r.error.message);
+          return link(r.data.id);
+        });
+      });
+  }
+
+  // 솔로: 매번 새 세션
   return sb.from("sessions").insert({
-    room_code: Room.code || null,
-    played_on: snap.date,
-    snapshot: snap
-  }).select().single().then(function(res){
-    if (res.error || !res.data) return;
-    // 참여자로 나 자신 기록 (다인 지원은 방 시스템으로 확장 여지)
-    return sb.from("user_sessions").insert({
-      user_id: Me.id, session_id: res.data.id,
-      player_name: Me.nickname
-    });
+    room_code: null, played_on: snap.date, snapshot: snap
+  }).select().single().then(function(r){
+    if (r.error) throw new Error(r.error.message);
+    return link(r.data.id);
   });
 }
 
 function listMySessions(limit){
   if (!sb || !Me) return Promise.resolve([]);
-  return sb.from("user_sessions").select("session_id, sessions(played_on, snapshot, room_code)")
-    .eq("user_id", Me.id).order("session_id", {ascending:false}).limit(limit||30)
-    .then(function(res){ return (res.data || []).map(function(r){ return r.sessions; }).filter(Boolean); });
+  return sb.from("user_sessions")
+    .select("player_name, session_id, sessions(id, played_on, snapshot, room_code, created_at)")
+    .eq("user_id", Me.id)
+    .order("session_id", {ascending:false}).limit(limit||30)
+    .then(function(res){
+      return (res.data || []).map(function(r){
+        if (!r.sessions) return null;
+        return {
+          id: r.sessions.id,
+          played_on: r.sessions.played_on,
+          snapshot: r.sessions.snapshot,
+          room_code: r.sessions.room_code,
+          created_at: r.sessions.created_at,
+          player_name: r.player_name
+        };
+      }).filter(Boolean);
+    });
 }
 
 
@@ -2155,11 +2197,20 @@ function renderHistory(){
     '</div>';
   }).join("");
 
+  var cloudSection = Me
+    ? '<p class="eyebrow" style="margin:20px 0 8px">내 클라우드 이력 (' + esc(Me.nickname) + ')</p>' +
+      '<div id="cloud-hist"><div class="card"><p class="empty">불러오는 중…</p></div></div>'
+    : '';
+
   host.innerHTML =
+    cloudSection +
     '<p class="eyebrow" style="margin:20px 0 8px">지난 경기 기록 (' + keys.length + ')</p>' +
     (keys.length ? '<div class="hist">' + items + '</div>'
                  : '<div class="card"><p class="empty">아직 저장된 경기가 없습니다. 대진표를 만들면 그 날짜로 자동 저장됩니다.</p></div>') +
     '<div style="margin-top:16px"><button class="btn" id="hist-new" style="width:100%">새 경기 시작</button></div>';
+
+  // 클라우드 이력 로드 (비동기)
+  if (Me) loadCloudHistory();
 
   Array.prototype.forEach.call(host.querySelectorAll(".hist-open"), function(b){
     b.addEventListener("click", function(){
@@ -2266,6 +2317,12 @@ function renderSaveBar(){
     btn.textContent = "저장됨";
     msg.innerHTML = "<b>" + pr.done + "/" + pr.all + "</b> 경기"
       + (S.savedAt ? " · " + fmtTime(S.savedAt) + " 저장" : "");
+  }
+
+  // 클라우드 저장 버튼: 로그인 상태 + 최소 1경기 이상 결과 있을 때만 노출
+  var cs = $("#cloud-save-btn");
+  if (cs){
+    cs.hidden = !(Me && pr.done > 0);
   }
 }
 
@@ -2553,6 +2610,9 @@ function refreshAuthUI(){
     btn.textContent = "로그인";
     if (roomBtn){ roomBtn.hidden = true; }
   }
+  // 저장 바의 클라우드 저장 버튼 상태도 갱신
+  renderSaveBar();
+  if (S.tab === "history") renderHistory();
 }
 
 function toast(msg){
@@ -2621,15 +2681,69 @@ function refreshRoomList(){
   });
 }
 
+// 기록 탭의 클라우드 이력 섹션 렌더
+function loadCloudHistory(){
+  var host = $("#cloud-hist");
+  if (!host) return;
+  listMySessions(30).then(function(rows){
+    if (!rows.length){
+      host.innerHTML = '<div class="card"><p class="empty">클라우드에 저장된 세션이 없습니다. 대진표 화면에서 <b>내 이력에 저장</b> 버튼을 눌러 저장하세요.</p></div>';
+      return;
+    }
+    host.innerHTML = '<div class="hist">' + rows.map(function(s){
+      var snap = s.snapshot || {};
+      var pr = snap.schedule ? progressOf(snap) : {done:0, all:0};
+      var meta = (snap.count ? snap.count + "명" : "?명")
+        + (snap.schedule ? " · " + snap.schedule.length + "라운드" : "")
+        + " · " + pr.done + "/" + pr.all + "경기 입력"
+        + (s.room_code ? " · 방 " + s.room_code : " · 솔로");
+      return '<div class="hist-item">' +
+        '<button class="hist-open" data-sid="' + s.id + '">' +
+          '<div class="hist-d">' + fmtDateFull(s.played_on) + '</div>' +
+          '<div class="hist-m">' + esc(meta) + '</div>' +
+        '</button>' +
+      '</div>';
+    }).join("") + '</div>';
+    // 세션 열기 → 로컬 DB에 복원 후 대진 화면으로
+    Array.prototype.forEach.call(host.querySelectorAll(".hist-open"), function(b){
+      b.addEventListener("click", function(){
+        var sid = this.dataset.sid;
+        var s = rows.filter(function(r){ return r.id === sid; })[0];
+        if (!s || !s.snapshot) return;
+        startNewFromView();
+        scrollMem = {};
+        hydrate(s.snapshot);
+        DB.current = S.date; S.tab = "sched"; render(); window.scrollTo({top:0});
+        toast("클라우드 세션 불러옴");
+      });
+    });
+  })["catch"](function(e){
+    host.innerHTML = '<div class="card"><p class="empty" style="color:#8f2f2f">로드 실패: ' + esc(e.message || e) + '</p></div>';
+  });
+}
+
 function bindAuthUI(){
   $("#btn-auth").addEventListener("click", function(){
     if (Me){
-      if (confirm(Me.nickname + " 로그아웃 하시겠어요?")){ signOut(); refreshAuthUI(); toast("로그아웃"); }
+      if (confirm(Me.nickname + " 로그아웃 하시겠어요?")){ signOut(); refreshAuthUI(); if (S.tab === "history") renderHistory(); toast("로그아웃"); }
     } else { openAuthModal(); }
   });
   $("#btn-room").addEventListener("click", function(){
     if (!Me){ openAuthModal(); return; }
     openRoomModal();
+  });
+  // 클라우드 저장 버튼
+  var cs = $("#cloud-save-btn");
+  if (cs) cs.addEventListener("click", function(){
+    if (!Me){ openAuthModal(); return; }
+    cs.disabled = true; cs.textContent = "저장 중…";
+    saveSession().then(function(){
+      cs.textContent = "저장됨"; toast("내 이력에 저장됨");
+      setTimeout(function(){ cs.disabled = false; cs.textContent = "내 이력에 저장"; }, 1500);
+    })["catch"](function(e){
+      cs.disabled = false; cs.textContent = "내 이력에 저장";
+      toast("실패: " + (e.message || e));
+    });
   });
 
   // 모달 닫기 (배경/버튼)
