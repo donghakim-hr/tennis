@@ -1,6 +1,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>테니스 매칭</title>
+<!-- Supabase JS SDK (계정·방·실시간·이력) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+// ★ Supabase 프로젝트 키 (supabase/README.md 참조)
+window.SUPABASE_URL      = "https://btpaoclzkqsmhjmtzoyo.supabase.co";
+window.SUPABASE_ANON_KEY = "sb_publishable_X_1Y6-P3pCaFpqdTg32www_RCxpd4DH";
+</script>
 <meta name="description" content="동호회 테니스 대진 생성과 결과 집계. 단식·동성복식·혼성복식 지원.">
 <meta name="theme-color" content="#2f6bb3">
 <meta name="mobile-web-app-capable" content="yes">
@@ -269,13 +276,14 @@
   .datechip.vo{color:#8f2f2f;background:#fdecec}   /* 열람용(공유 링크) 표시 */
 
   /* ---------- summary ---------- */
-  .sum{font-size:13px}
-  .sum th,.sum td{text-align:left;padding:10px 8px;vertical-align:middle}
+  .sum{font-size:13px;width:auto;margin:0 auto}
+  .sum th,.sum td{text-align:left;padding:10px 14px;vertical-align:middle}
   .sum th:first-child,.sum td:first-child{
     width:34px;text-align:center;padding-left:0;
     position:sticky;left:0;background:var(--card);z-index:1;box-shadow:1px 0 0 var(--hair);
   }
   .sum td:first-child{font-weight:800;color:var(--muted);font-variant-numeric:tabular-nums}
+  .sum td.vscol{white-space:nowrap}
   .vs{white-space:nowrap}
   .vs .t{font-weight:700;letter-spacing:-.01em}
   .vs .t.w{color:var(--win)}
@@ -284,13 +292,12 @@
     background:var(--bg);border-radius:6px;padding:2px 7px;margin:0 6px;font-size:12.5px;
   }
   .vs .sc.pending{color:var(--muted);font-weight:600}
-  .sum td.byecol{color:var(--muted);font-size:12px;text-align:right;white-space:nowrap}
+  .sum td.byecol{color:var(--muted);font-size:12px;text-align:left;white-space:nowrap;padding-left:24px}
 
-  .mx{font-size:12px}
-  .mx th,.mx td{padding:6px 3px;text-align:center;white-space:nowrap}
+  .mx{font-size:12px;table-layout:fixed;width:100%}
+  .mx th,.mx td{padding:8px 4px;text-align:center;white-space:nowrap;overflow:hidden}
   .mx th:first-child,.mx td:first-child{
-    text-align:left;width:auto;padding-left:0;font-weight:700;
-    position:sticky;left:0;background:var(--card);z-index:1;padding-right:10px;
+    text-align:left;padding-left:0;padding-right:8px;font-weight:700;
     box-shadow:1px 0 0 var(--hair);
   }
   .cell{
@@ -399,6 +406,52 @@
     font-size:13px;font-weight:700;opacity:0;pointer-events:none;transition:.2s;z-index:50;
   }
   .toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  /* ---------- 로그인·방 액션 버튼 (헤더) ---------- */
+  .baractions{margin-left:auto;display:flex;gap:6px}
+  .baractions .btn{padding:7px 12px;font-size:12.5px}
+  .baractions .btn.on{background:var(--court);color:#fff;border-color:var(--court)}
+
+  /* ---------- 모달 ---------- */
+  .modal{
+    position:fixed;inset:0;background:rgba(14,26,38,.45);
+    display:flex;align-items:center;justify-content:center;z-index:100;padding:16px;
+  }
+  .modal-card{
+    background:var(--card);border-radius:16px;padding:22px 20px 20px;
+    width:100%;max-width:420px;max-height:90vh;overflow:auto;position:relative;
+    box-shadow:0 8px 40px rgba(14,26,38,.2);
+  }
+  .modal-card h3{margin:0 0 6px;font-size:18px;letter-spacing:-.02em}
+  .modal-close{
+    position:absolute;top:10px;right:10px;background:none;border:0;
+    font-size:22px;line-height:1;padding:6px 10px;cursor:pointer;color:var(--muted);
+  }
+  .modal-close:hover{color:var(--ink)}
+  .row-in{display:flex;flex-direction:column;gap:4px;margin-top:12px;font-size:12px;color:var(--muted);font-weight:700}
+  .row-in input{
+    padding:11px 12px;border:1px solid var(--hair);border-radius:10px;
+    font-size:14px;color:var(--ink);font:inherit;
+  }
+  .row-in input:focus{outline:2px solid var(--court);outline-offset:-1px}
+  .modal-actions{display:flex;gap:8px;margin-top:16px}
+  .modal-actions .btn{flex:1;padding:12px}
+  .mAuth-hint{font-size:12px;color:var(--muted);margin:4px 0 0}
+  .mAuth-err{color:#8f2f2f;font-size:12.5px;margin-top:10px;min-height:16px;font-weight:700}
+  .room-cur{
+    background:var(--bg);border:1px solid var(--hair);border-radius:10px;
+    padding:10px 12px;margin:8px 0;font-size:13px;display:flex;align-items:center;gap:8px;
+  }
+  .room-cur b{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em}
+  .room-actions{display:flex;flex-direction:column;gap:10px;margin-top:8px}
+  .room-list{display:flex;flex-direction:column;gap:6px;margin-top:6px;max-height:220px;overflow:auto}
+  .room-list button{
+    text-align:left;padding:10px 12px;border:1px solid var(--hair);border-radius:10px;
+    background:var(--card);font:inherit;cursor:pointer;color:var(--ink);
+  }
+  .room-list button:hover{background:var(--bg)}
+  .room-list .rc{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:800;letter-spacing:.06em;color:var(--court)}
+  .room-list .rt{font-size:12px;color:var(--muted);margin-left:6px}
   @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 
@@ -408,6 +461,10 @@
     <h1>테니스 복식 매칭</h1>
     <span class="datechip" id="datechip" hidden></span>
     <span class="prog" id="prog" aria-live="polite"></span>
+    <span class="baractions">
+      <button class="btn ghost" id="btn-room" type="button" hidden>방</button>
+      <button class="btn ghost" id="btn-auth" type="button">로그인</button>
+    </span>
   </div>
   <div class="tabs" id="tabs" role="tablist" hidden>
     <button class="tab" id="tab-sched" role="tab" aria-controls="sched" aria-selected="true">대진표</button>
@@ -545,12 +602,241 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- 로그인/회원가입 모달 -->
+<div class="modal" id="mAuth" hidden>
+  <div class="modal-card">
+    <button class="modal-close" data-close aria-label="닫기">×</button>
+    <h3 id="mAuth-title">로그인</h3>
+    <p class="mAuth-hint">닉네임과 4자리 PIN으로 접속합니다. 개인정보는 저장하지 않습니다.</p>
+    <label class="row-in">닉네임 <input id="mAuth-nick" maxlength="20" autocomplete="username" placeholder="예: 홍길동"></label>
+    <label class="row-in">PIN (숫자 4자리) <input id="mAuth-pin" type="password" inputmode="numeric" maxlength="4" pattern="\d{4}" autocomplete="current-password" placeholder="****"></label>
+    <div class="mAuth-err" id="mAuth-err"></div>
+    <div class="modal-actions">
+      <button class="btn" id="mAuth-submit" type="button">로그인</button>
+      <button class="btn ghost" id="mAuth-toggle" type="button">회원가입으로</button>
+    </div>
+  </div>
+</div>
+
+<!-- 방 모달 -->
+<div class="modal" id="mRoom" hidden>
+  <div class="modal-card">
+    <button class="modal-close" data-close aria-label="닫기">×</button>
+    <h3 id="mRoom-title">방</h3>
+    <div id="mRoom-current" hidden class="room-cur"></div>
+    <div class="room-actions">
+      <button class="btn" id="mRoom-create" type="button">현재 대진표로 방 만들기</button>
+      <label class="row-in">방 코드로 접속 <input id="mRoom-code" maxlength="6" placeholder="예: K3M7X2" style="text-transform:uppercase"></label>
+      <button class="btn ghost" id="mRoom-join" type="button">코드로 접속</button>
+    </div>
+    <p class="eyebrow" style="margin-top:16px">지금 열려있는 방</p>
+    <div id="mRoom-list" class="room-list"></div>
+    <div class="mAuth-err" id="mRoom-err"></div>
+  </div>
+</div>
+
 <script>
 (function(){
 "use strict";
 var d = document;
 var $ = function(s){ return d.querySelector(s); };
 var dirty = false;   // 저장하지 않은 점수 변경 여부
+
+/* ---------------- Supabase 클라이언트 & 인증 ---------------- */
+// window.supabase = SDK 네임스페이스, sb = 우리 앱 전용 클라이언트 인스턴스
+var sb = null;
+if (window.SUPABASE_URL && window.SUPABASE_ANON_KEY && window.supabase && window.supabase.createClient){
+  try {
+    sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY, {
+      realtime: { params: { eventsPerSecond: 10 } }
+    });
+  } catch(e){ sb = null; }
+}
+
+// 로그인 상태 (localStorage에 user id/nickname만 저장, PIN은 저장 안 함)
+var AUTH_KEY = "tennis:auth";
+var Me = null;   // { id, nickname }
+try {
+  var raw = window.localStorage && window.localStorage.getItem(AUTH_KEY);
+  if (raw) Me = JSON.parse(raw);
+} catch(e){}
+
+function setMe(u){
+  Me = u;
+  try {
+    if (u) window.localStorage.setItem(AUTH_KEY, JSON.stringify({id:u.id, nickname:u.nickname}));
+    else   window.localStorage.removeItem(AUTH_KEY);
+  } catch(e){}
+}
+
+// SHA-256 해싱 (PIN + salt) — 4자리 PIN이라 salt가 필수
+function toHex(buf){
+  var a = new Uint8Array(buf), s = "";
+  for (var i=0;i<a.length;i++){ s += ("0"+a[i].toString(16)).slice(-2); }
+  return s;
+}
+function randSalt(){
+  var a = new Uint8Array(16);
+  (window.crypto || window.msCrypto).getRandomValues(a);
+  return toHex(a.buffer);
+}
+function hashPin(pin, salt){
+  var enc = new TextEncoder().encode(pin + ":" + salt);
+  return (window.crypto || window.msCrypto).subtle.digest("SHA-256", enc).then(toHex);
+}
+
+// 회원가입: 닉네임 + 4자리 PIN
+function signUp(nickname, pin){
+  if (!sb) return Promise.reject(new Error("Supabase 설정이 없습니다"));
+  if (!/^\d{4}$/.test(pin)) return Promise.reject(new Error("PIN은 숫자 4자리"));
+  if (!nickname || nickname.length < 2 || nickname.length > 20) return Promise.reject(new Error("닉네임은 2~20자"));
+  var salt = randSalt();
+  return hashPin(pin, salt).then(function(hash){
+    return sb.from("app_users").insert({ nickname: nickname, pin_hash: hash, pin_salt: salt })
+      .select().single();
+  }).then(function(res){
+    if (res.error){
+      if (res.error.code === "23505") throw new Error("이미 쓰는 닉네임입니다");
+      throw new Error(res.error.message);
+    }
+    setMe(res.data);
+    return res.data;
+  });
+}
+
+// 로그인: 닉네임으로 salt 조회 → 해시 비교
+function signIn(nickname, pin){
+  if (!sb) return Promise.reject(new Error("Supabase 설정이 없습니다"));
+  return sb.from("app_users").select("id,nickname,pin_hash,pin_salt").eq("nickname", nickname).maybeSingle()
+    .then(function(res){
+      if (res.error) throw new Error(res.error.message);
+      if (!res.data)  throw new Error("없는 닉네임입니다");
+      return hashPin(pin, res.data.pin_salt).then(function(h){
+        if (h !== res.data.pin_hash) throw new Error("PIN이 틀립니다");
+        var u = { id: res.data.id, nickname: res.data.nickname };
+        setMe(u);
+        // 마지막 접속 시각 업데이트 (실패해도 무시)
+        sb.from("app_users").update({ last_seen_at: new Date().toISOString() }).eq("id", u.id).then(function(){});
+        return u;
+      });
+    });
+}
+
+function signOut(){
+  if (Room.channel){ try { Room.channel.unsubscribe(); } catch(e){} Room.channel = null; }
+  Room.code = null;
+  setMe(null);
+}
+
+/* ---------------- 방 시스템 ---------------- */
+var Room = {
+  code: null,           // 현재 접속 중인 방 코드
+  channel: null,        // Realtime 채널
+  suppressSync: false,  // 원격 변경 반영 중일 때 로컬 save() 재전송 방지
+  lastPushAt: 0         // 최근 push 시각 (에코 무시용)
+};
+
+function randRoomCode(){
+  var s = "", chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";  // 헷갈리는 0,O,1,I 제외
+  for (var i=0;i<6;i++) s += chars[Math.floor(Math.random()*chars.length)];
+  return s;
+}
+
+// 열려있는 방 목록 (최근 업데이트 순)
+function listOpenRooms(limit){
+  if (!sb) return Promise.resolve([]);
+  return sb.from("rooms").select("code,title,owner_id,updated_at,state")
+    .eq("is_open", true).order("updated_at", {ascending:false}).limit(limit||20)
+    .then(function(res){ return res.data || []; });
+}
+
+// 방 만들기 — 현재 S 스냅샷을 초기 state로 저장
+function createRoom(title){
+  if (!sb) return Promise.reject(new Error("Supabase 설정이 없습니다"));
+  if (!Me) return Promise.reject(new Error("로그인이 필요합니다"));
+  var code = randRoomCode();
+  return sb.from("rooms").insert({
+    code: code, owner_id: Me.id, title: title || "",
+    state: snapshot(), is_open: true
+  }).select().single().then(function(res){
+    if (res.error) throw new Error(res.error.message);
+    return joinRoom(code).then(function(){ return code; });
+  });
+}
+
+// 방 접속 — 상태 로드 + Realtime 구독
+function joinRoom(code){
+  if (!sb) return Promise.reject(new Error("Supabase 설정이 없습니다"));
+  return sb.from("rooms").select("state,title,owner_id").eq("code", code).maybeSingle()
+    .then(function(res){
+      if (res.error) throw new Error(res.error.message);
+      if (!res.data)  throw new Error("없는 방입니다");
+      // 원격 상태를 로컬에 반영
+      Room.suppressSync = true;
+      try { hydrate(res.data.state); } finally { Room.suppressSync = false; }
+      Room.code = code;
+      // Realtime 구독
+      if (Room.channel){ try { Room.channel.unsubscribe(); } catch(e){} }
+      Room.channel = sb.channel("room:" + code)
+        .on("postgres_changes",
+            { event: "UPDATE", schema: "public", table: "rooms", filter: "code=eq." + code },
+            function(payload){
+              // 자기가 방금 push한 경우는 에코 무시 (updated_at이 lastPushAt에 매우 근접)
+              if (Date.now() - Room.lastPushAt < 500) return;
+              Room.suppressSync = true;
+              try { hydrate(payload.new.state); render(); } finally { Room.suppressSync = false; }
+            })
+        .subscribe();
+      render();
+    });
+}
+
+function leaveRoom(){
+  if (Room.channel){ try { Room.channel.unsubscribe(); } catch(e){} Room.channel = null; }
+  Room.code = null;
+  render();
+}
+
+// 방 상태 push (save()에서 호출)
+function pushRoomState(){
+  if (!sb || !Room.code || Room.suppressSync) return;
+  Room.lastPushAt = Date.now();
+  sb.from("rooms").update({ state: snapshot() }).eq("code", Room.code).then(function(){});
+}
+
+// 방 닫기 (owner만)
+function closeRoom(){
+  if (!sb || !Room.code || !Me) return Promise.resolve();
+  return sb.from("rooms").update({ is_open: false }).eq("code", Room.code).eq("owner_id", Me.id)
+    .then(function(){ leaveRoom(); });
+}
+
+/* ---------------- 세션 이력 (완료된 게임) ---------------- */
+function saveSession(){
+  if (!sb || !Me) return Promise.resolve();
+  var snap = snapshot();
+  if (!snap.schedule || !snap.schedule.length) return Promise.resolve();
+  return sb.from("sessions").insert({
+    room_code: Room.code || null,
+    played_on: snap.date,
+    snapshot: snap
+  }).select().single().then(function(res){
+    if (res.error || !res.data) return;
+    // 참여자로 나 자신 기록 (다인 지원은 방 시스템으로 확장 여지)
+    return sb.from("user_sessions").insert({
+      user_id: Me.id, session_id: res.data.id,
+      player_name: Me.nickname
+    });
+  });
+}
+
+function listMySessions(limit){
+  if (!sb || !Me) return Promise.resolve([]);
+  return sb.from("user_sessions").select("session_id, sessions(played_on, snapshot, room_code)")
+    .eq("user_id", Me.id).order("session_id", {ascending:false}).limit(limit||30)
+    .then(function(res){ return (res.data || []).map(function(r){ return r.sessions; }).filter(Boolean); });
+}
+
 
 /* ---------------- storage (works inside Claude artifacts; falls back to memory) ------- */
 var KEY = "tennis:sessions";
@@ -655,6 +941,8 @@ function save(){
   if (viewOnly) return;   // 공유 링크로 본 결과는 기기에 남기지 않는다
   if (S.schedule && S.date){ DB.sessions[S.date] = snapshot(); DB.current = S.date; }
   Store.set(DB);
+  // 방에 접속 중이면 원격 상태도 push (실시간 동기화)
+  pushRoomState();
 }
 /* 점수는 입력이 멈추면 스스로 저장된다 — 경기 중 '저장' 버튼을 누를 이유를 없앤다 */
 var saveT;
@@ -684,9 +972,10 @@ function zeros(n){
 }
 var PAIRINGS = [[[0,1],[2,3]],[[0,2],[1,3]],[[0,3],[1,2]]];
 
-var W_PAIR = 40;   // 같은 사람과 다시 페어
-var W_OPPO = 4;    // 같은 사람과 다시 상대
-var W_BAL  = 12;   // 팀 전력 1점 차이당 (실력 등급 사용 시)
+var W_PAIR  = 40;  // 같은 사람과 다시 페어
+var W_OPPO  = 4;   // 같은 사람과 다시 상대
+var W_BAL   = 12;  // 팀 전력 1점 차이당 (실력 등급 사용 시)
+var W_GROUP = 2;   // 같은 게임에 함께한 적 있는 쌍 (그룹 다양화)
 
 // 실력 등급: 3=A(상) 2=B(중) 1=C(하). 미입력은 B로 본다
 function lvIn(sess, i){
@@ -724,11 +1013,18 @@ function attempt(cfg){
   var seats = courts * (single ? 2 : 4);
   var out = [], total = 0;
 
-  function ord(a,b){ return (played[a]-played[b]) || (cfg.cap ? streak[a]-streak[b] : 0); }
   function pick(list, k){
-    // 출전 횟수 적은 사람 우선, 동점이면 연속 출전 긴 사람이 뒤로 밀려 휴식
-    var o = shuffle(list); o.sort(ord);
-    return { act: shuffle(o.slice(0,k)), bye: o.slice(k) };
+    // cap=true: streak 3 이상은 강제 휴식 (하드 제약). 인원 부족이면 soft fallback
+    var pool = list, extra = [];
+    if (cfg.cap) {
+      var mustRest = list.filter(function(i){ return streak[i] >= 3; });
+      var canPlay  = list.filter(function(i){ return streak[i] < 3;  });
+      if (canPlay.length >= k) { pool = canPlay; extra = mustRest; }
+    }
+    // 출전 횟수 적은 사람 우선, 동수면 무작위 — 300회 시도마다 다른 그룹을 탐색해 W_GROUP이 작동한다
+    var o = shuffle(pool);
+    o.sort(function(a,b){ return played[a] - played[b]; });
+    return { act: shuffle(o.slice(0,k)), bye: o.slice(k).concat(extra) };
   }
 
   var allIdx = Array.from({length:n},function(_,i){return i;});
@@ -790,6 +1086,13 @@ function attempt(cfg){
         }
         ms.push(bp); cost += bc;
       }
+      // 그룹 다양성 패널티: 4인 그룹 내 이미 같은 게임을 한 쌍이 많을수록 비용 증가
+      var grpAct = mixed ? actM.concat(actF) : act;
+      for (var gi=0, glen=grpAct.length; gi<glen-1; gi++) {
+        for (var gj=gi+1; gj<glen; gj++) {
+          cost += (partner[grpAct[gi]][grpAct[gj]] + oppo[grpAct[gi]][grpAct[gj]]) * W_GROUP;
+        }
+      }
       if (cost<bestCost){ bestCost=cost; best={matches:ms,byes:byes}; }
       if (cost===0) break;
     }
@@ -822,7 +1125,6 @@ function attemptFixed(cfg){
   var teamIdx = Array.from({length:T},function(_,i){return i;});
   var teamLv = pairs.map(function(p){ return lv ? lv[p[0]] + lv[p[1]] : 0; });
 
-  function ord(a,b){ return (played[a]-played[b]) || (cfg.cap ? streak[a]-streak[b] : 0); }
   var pinOK = cfg.anchor && T >= 2;
 
   for (var r=0;r<rounds;r++){
@@ -831,8 +1133,17 @@ function attemptFixed(cfg){
     for (var t=0;t<300;t++){
       var pool = pin ? teamIdx.filter(function(x){ return x >= 2; }) : teamIdx;
       var need = courts*2 - (pin ? 2 : 0);
-      var o = shuffle(pool); o.sort(ord);
-      var act = shuffle(o.slice(0,need)), restT = o.slice(need);
+      // cap=true: streak 3 이상 팀은 강제 휴식 (하드 제약). 인원 부족이면 soft fallback
+      var extraT = [];
+      if (cfg.cap) {
+        var mustRestT = pool.filter(function(x){ return streak[x] >= 3; });
+        var eligT     = pool.filter(function(x){ return streak[x] < 3;  });
+        if (eligT.length >= need) { pool = eligT; extraT = mustRestT; }
+      }
+      // 출전 횟수 적은 팀 우선, 동수면 무작위
+      var o = shuffle(pool);
+      o.sort(function(a,b){ return played[a] - played[b]; });
+      var act = shuffle(o.slice(0,need)), restT = o.slice(need).concat(extraT);
       var ms = [], cost = 0, used = [];
       if (pin){ ms.push({ a:pairs[0].slice(), b:pairs[1].slice(), t:[0,1] }); used.push(0,1); }
       for (var c=0;c<need/2;c++){
@@ -1761,13 +2072,13 @@ function renderSummary(){
   var head = "";
   for (var c=0;c<courts;c++) head += "<th>코트 " + (c+1) + "</th>";
   var anyBye = S.schedule.some(function(r){ return r.byes.length; });
-  if (anyBye) head += "<th style='text-align:right'>휴식</th>";
+  if (anyBye) head += "<th style='text-align:left;padding-left:20px'>휴식</th>";
 
   var body = S.schedule.map(function(rd, ri){
     var tds = rd.matches.map(function(m){
       var done = filled(m);
       var aw = done && +m.sa > +m.sb, bw = done && +m.sb > +m.sa;
-      return '<td><span class="vs">' +
+      return '<td class="vscol"><span class="vs">' +
         '<span class="t' + (aw?" w":"") + '">' + m.a.map(function(t){ return esc(nameOf(t)); }).join("·") + '</span>' +
         '<span class="sc' + (done?"":" pending") + '">' + (done ? m.sa + ":" + m.sb : "–") + '</span>' +
         '<span class="t' + (bw?" w":"") + '">' + m.b.map(function(t){ return esc(nameOf(t)); }).join("·") + '</span>' +
@@ -1777,10 +2088,13 @@ function renderSummary(){
     return "<tr><td>" + (ri+1) + "</td>" + tds + "</tr>";
   }).join("");
 
-  // 개인별 라운드 매트릭스
-  var mxHead = "<th>참가자</th>";
-  S.schedule.forEach(function(_, ri){ mxHead += "<th>" + (ri+1) + "</th>"; });
-  mxHead += "<th>경기</th><th>연속</th>";
+  // 개인별 라운드 매트릭스 - 컬럼 폭을 첫 행 th에 인라인으로 명시 (table-layout:fixed와 조합)
+  var nR = S.schedule.length;
+  var firstPct = 14, lastPct = 8;
+  var rndPct = (100 - firstPct - lastPct*2) / nR;
+  var mxHead = '<th style="width:' + firstPct + '%">참가자</th>';
+  S.schedule.forEach(function(_, ri){ mxHead += '<th style="width:' + rndPct + '%">' + (ri+1) + '</th>'; });
+  mxHead += '<th style="width:' + lastPct + '%">경기</th><th style="width:' + lastPct + '%">연속</th>';
 
   var streaks = streaksOf(S.schedule, S.count);
   var mxBody = "";
@@ -2222,6 +2536,137 @@ Store.get().then(function(saved){
   openShared();   // 공유 링크가 있으면 그 결과가 우선
   $("#date").value = S.date;
   render();
+  bindAuthUI();
+  refreshAuthUI();
 });
+
+/* ---------------- 인증·방 UI 바인딩 ---------------- */
+var authMode = "signin";  // 'signin' | 'signup'
+
+function refreshAuthUI(){
+  var btn = $("#btn-auth"), roomBtn = $("#btn-room");
+  if (!btn) return;
+  if (Me){
+    btn.textContent = Me.nickname + " · 로그아웃";
+    if (roomBtn){ roomBtn.hidden = false; roomBtn.textContent = Room.code ? ("방 " + Room.code) : "방"; roomBtn.classList.toggle("on", !!Room.code); }
+  } else {
+    btn.textContent = "로그인";
+    if (roomBtn){ roomBtn.hidden = true; }
+  }
+}
+
+function toast(msg){
+  var el = $("#toast"); if (!el) return;
+  el.textContent = msg; el.classList.add("on");
+  clearTimeout(toast._t); toast._t = setTimeout(function(){ el.classList.remove("on"); }, 1800);
+}
+
+function openAuthModal(){
+  authMode = "signin";
+  $("#mAuth-title").textContent = "로그인";
+  $("#mAuth-submit").textContent = "로그인";
+  $("#mAuth-toggle").textContent = "회원가입으로";
+  $("#mAuth-err").textContent = "";
+  $("#mAuth-nick").value = ""; $("#mAuth-pin").value = "";
+  $("#mAuth").hidden = false;
+  setTimeout(function(){ $("#mAuth-nick").focus(); }, 30);
+}
+function closeAuthModal(){ $("#mAuth").hidden = true; }
+
+function submitAuth(){
+  var nick = $("#mAuth-nick").value.trim();
+  var pin  = $("#mAuth-pin").value.trim();
+  var err  = $("#mAuth-err");
+  err.textContent = "";
+  var fn = (authMode === "signup") ? signUp : signIn;
+  fn(nick, pin).then(function(){
+    closeAuthModal(); refreshAuthUI();
+    toast(authMode === "signup" ? "환영합니다, " + Me.nickname : Me.nickname + "님 로그인");
+  })["catch"](function(e){ err.textContent = e.message || "실패"; });
+}
+
+function openRoomModal(){
+  $("#mRoom-err").textContent = "";
+  $("#mRoom-code").value = "";
+  var cur = $("#mRoom-current");
+  if (Room.code){
+    cur.hidden = false;
+    cur.innerHTML = "현재 접속: <b>" + Room.code + "</b> " +
+      '<button class="btn ghost" id="mRoom-leave" type="button" style="margin-left:auto;padding:6px 10px;font-size:12px">나가기</button>';
+    $("#mRoom-leave").addEventListener("click", function(){ leaveRoom(); openRoomModal(); toast("방에서 나갔습니다"); });
+  } else { cur.hidden = true; }
+  $("#mRoom").hidden = false;
+  refreshRoomList();
+}
+function closeRoomModal(){ $("#mRoom").hidden = true; }
+
+function refreshRoomList(){
+  var host = $("#mRoom-list");
+  host.innerHTML = "<span style='color:var(--muted);font-size:12.5px'>불러오는 중…</span>";
+  listOpenRooms(20).then(function(rows){
+    if (!rows.length){ host.innerHTML = "<span style='color:var(--muted);font-size:12.5px'>열려있는 방이 없어요</span>"; return; }
+    host.innerHTML = "";
+    rows.forEach(function(r){
+      var b = d.createElement("button");
+      var title = r.title ? " <span class='rt'>· " + esc(r.title) + "</span>" : "";
+      var when  = r.updated_at ? new Date(r.updated_at) : null;
+      var ago   = when ? " <span class='rt'>· " + when.toLocaleString() + "</span>" : "";
+      b.innerHTML = "<span class='rc'>" + r.code + "</span>" + title + ago;
+      b.addEventListener("click", function(){
+        joinRoom(r.code).then(function(){ closeRoomModal(); refreshAuthUI(); toast("방 " + r.code + " 접속"); })
+          ["catch"](function(e){ $("#mRoom-err").textContent = e.message; });
+      });
+      host.appendChild(b);
+    });
+  });
+}
+
+function bindAuthUI(){
+  $("#btn-auth").addEventListener("click", function(){
+    if (Me){
+      if (confirm(Me.nickname + " 로그아웃 하시겠어요?")){ signOut(); refreshAuthUI(); toast("로그아웃"); }
+    } else { openAuthModal(); }
+  });
+  $("#btn-room").addEventListener("click", function(){
+    if (!Me){ openAuthModal(); return; }
+    openRoomModal();
+  });
+
+  // 모달 닫기 (배경/버튼)
+  d.querySelectorAll(".modal").forEach(function(m){
+    m.addEventListener("click", function(e){
+      if (e.target === m || e.target.hasAttribute("data-close")) m.hidden = true;
+    });
+  });
+
+  // 인증 폼
+  $("#mAuth-toggle").addEventListener("click", function(){
+    authMode = (authMode === "signin") ? "signup" : "signin";
+    $("#mAuth-title").textContent    = (authMode === "signup") ? "회원가입" : "로그인";
+    $("#mAuth-submit").textContent   = (authMode === "signup") ? "가입하기" : "로그인";
+    $("#mAuth-toggle").textContent   = (authMode === "signup") ? "로그인으로" : "회원가입으로";
+    $("#mAuth-err").textContent = "";
+  });
+  $("#mAuth-submit").addEventListener("click", submitAuth);
+  $("#mAuth-nick").addEventListener("keydown", function(e){ if (e.key === "Enter") $("#mAuth-pin").focus(); });
+  $("#mAuth-pin").addEventListener("keydown",  function(e){ if (e.key === "Enter") submitAuth(); });
+
+  // 방 폼
+  $("#mRoom-create").addEventListener("click", function(){
+    if (!S.schedule || !S.schedule.length){ $("#mRoom-err").textContent = "대진표를 먼저 만드세요"; return; }
+    var t = prompt("방 제목 (선택)", "") || "";
+    createRoom(t).then(function(code){
+      closeRoomModal(); refreshAuthUI();
+      toast("방 " + code + " 생성 완료");
+    })["catch"](function(e){ $("#mRoom-err").textContent = e.message; });
+  });
+  $("#mRoom-join").addEventListener("click", function(){
+    var c = $("#mRoom-code").value.trim().toUpperCase();
+    if (c.length !== 6){ $("#mRoom-err").textContent = "6자리 코드"; return; }
+    joinRoom(c).then(function(){ closeRoomModal(); refreshAuthUI(); toast("방 " + c + " 접속"); })
+      ["catch"](function(e){ $("#mRoom-err").textContent = e.message; });
+  });
+  $("#mRoom-code").addEventListener("keydown", function(e){ if (e.key === "Enter") $("#mRoom-join").click(); });
+}
 })();
 </script>
