@@ -481,6 +481,22 @@ window.SUPABASE_ANON_KEY = "sb_publishable_X_1Y6-P3pCaFpqdTg32www_RCxpd4DH";
   .admin-tbl .b-closed{background:#f0f2f5;color:var(--muted)}
   .admin-tbl .b-admin{background:#fdecec;color:#8f2f2f}
   .admin-scroll{max-height:60vh;overflow:auto;margin-top:8px}
+
+  .me-section .me-row{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:10px 0;border-bottom:1px solid var(--hair);font-size:13.5px;
+  }
+  .me-section .me-row:last-child{border-bottom:0}
+  .me-k{color:var(--muted);font-weight:700;font-size:12px}
+  .me-v{color:var(--ink)}
+  .me-hist{display:flex;flex-direction:column;gap:6px;max-height:40vh;overflow:auto}
+  .me-hist-item{
+    text-align:left;padding:10px 12px;border:1px solid var(--hair);border-radius:10px;
+    background:var(--card);font:inherit;cursor:pointer;color:var(--ink);
+  }
+  .me-hist-item:hover{background:var(--bg)}
+  .me-hist-d{font-weight:800;font-size:13.5px}
+  .me-hist-m{font-size:12px;color:var(--muted);margin-top:2px}
   @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 
@@ -495,6 +511,7 @@ window.SUPABASE_ANON_KEY = "sb_publishable_X_1Y6-P3pCaFpqdTg32www_RCxpd4DH";
     <span class="baractions">
       <button class="btn ghost" id="btn-admin" type="button" hidden>관리자</button>
       <button class="btn ghost" id="btn-room" type="button" hidden>코트</button>
+      <button class="btn ghost" id="btn-me" type="button" hidden>마이</button>
       <button class="btn ghost" id="btn-auth" type="button">로그인</button>
     </span>
   </div>
@@ -652,6 +669,30 @@ window.SUPABASE_ANON_KEY = "sb_publishable_X_1Y6-P3pCaFpqdTg32www_RCxpd4DH";
     <div class="modal-actions">
       <button class="btn" id="mAuth-submit" type="button">로그인</button>
       <button class="btn ghost" id="mAuth-toggle" type="button">회원가입으로</button>
+    </div>
+  </div>
+</div>
+
+<!-- 마이페이지 모달 -->
+<div class="modal" id="mMe" hidden>
+  <div class="modal-card" style="max-width:560px">
+    <button class="modal-close" data-close aria-label="닫기">×</button>
+    <h3>마이페이지</h3>
+    <div id="mMe-body"></div>
+  </div>
+</div>
+
+<!-- PIN 변경 모달 -->
+<div class="modal" id="mPin" hidden>
+  <div class="modal-card">
+    <button class="modal-close" data-close aria-label="닫기">×</button>
+    <h3>PIN 변경</h3>
+    <label class="row-in">현재 PIN <input id="mPin-cur" type="password" inputmode="numeric" maxlength="4" placeholder="****"></label>
+    <label class="row-in">새 PIN (4자리) <input id="mPin-new" type="password" inputmode="numeric" maxlength="4" placeholder="****"></label>
+    <label class="row-in">새 PIN 확인 <input id="mPin-new2" type="password" inputmode="numeric" maxlength="4" placeholder="****"></label>
+    <div class="mAuth-err" id="mPin-err"></div>
+    <div class="modal-actions">
+      <button class="btn" id="mPin-submit" type="button">변경</button>
     </div>
   </div>
 </div>
@@ -846,6 +887,24 @@ function signOut(){
   if (Room.channel){ try { Room.channel.unsubscribe(); } catch(e){} Room.channel = null; }
   Room.code = null;
   setMe(null);
+}
+
+// PIN 변경 (현재 PIN 확인 후 새 salt/hash로 교체)
+function changePin(curPin, newPin){
+  if (!sb || !Me) return Promise.reject(new Error("로그인 필요"));
+  if (!/^\d{4}$/.test(newPin)) return Promise.reject(new Error("PIN은 숫자 4자리"));
+  return sb.from("app_users").select("pin_hash,pin_salt").eq("id", Me.id).maybeSingle()
+    .then(function(res){
+      if (res.error || !res.data) throw new Error("계정 조회 실패");
+      return hashPin(curPin, res.data.pin_salt).then(function(h){
+        if (h !== res.data.pin_hash) throw new Error("현재 PIN이 틀립니다");
+        var newSalt = randSalt();
+        return hashPin(newPin, newSalt).then(function(newHash){
+          return sb.from("app_users").update({ pin_hash: newHash, pin_salt: newSalt }).eq("id", Me.id)
+            .then(function(r2){ if (r2.error) throw new Error(r2.error.message); });
+        });
+      });
+    });
 }
 
 /* ---------------- 방 시스템 ---------------- */
@@ -1311,9 +1370,13 @@ function attempt(cfg){
   var n = cfg.n, courts = cfg.courts, rounds = cfg.rounds;
   var single = cfg.type === "single", mixed = cfg.type === "mixed";
   var lv = cfg.lv || null;
-  var partner = zeros(n), oppo = zeros(n);
-  var prevMatch = zeros(n);   // 직전 라운드 같은 매치였던 쌍 (W_ADJACENT용)
-  var played = new Array(n).fill(0), streak = new Array(n).fill(0);
+  var seed = cfg.seed || null;   // 이전 phase에서 이어받는 상태 (하이브리드용)
+  function copy2(mtx){ return mtx.map(function(r){ return r.slice(); }); }
+  var partner = seed ? copy2(seed.partner) : zeros(n);
+  var oppo = seed ? copy2(seed.oppo) : zeros(n);
+  var prevMatch = seed ? copy2(seed.prevMatch) : zeros(n);
+  var played = seed ? seed.played.slice() : new Array(n).fill(0);
+  var streak = seed ? seed.streak.slice() : new Array(n).fill(0);
   var seats = courts * (single ? 2 : 4);
   var out = [], total = 0;
 
@@ -1331,7 +1394,9 @@ function attempt(cfg){
     return { act: shuffle(o.slice(0,k)), bye: o.slice(k).concat(extra) };
   }
 
-  var allIdx = Array.from({length:n},function(_,i){return i;});
+  // eligiblePool: 특정 인덱스만 이번 phase에서 뛰게 함 (하이브리드 phase 2에서 다수 성별만)
+  var allIdx = cfg.eligiblePool ? cfg.eligiblePool.slice()
+             : Array.from({length:n},function(_,i){return i;});
   var males   = mixed ? allIdx.filter(function(i){ return cfg.genders[i] !== "F"; }) : null;
   var females = mixed ? allIdx.filter(function(i){ return cfg.genders[i] === "F"; }) : null;
 
@@ -1471,7 +1536,9 @@ function attempt(cfg){
     for (var q=0;q<n;q++) streak[q] = inPlay[q] ? streak[q]+1 : 0;
     out.push(best); total += bestCost;
   }
-  return { rounds: out, cost: total };
+  return { rounds: out, cost: total,
+           state: { partner: partner, oppo: oppo, prevMatch: prevMatch,
+                    played: played, streak: streak } };
 }
 
 /* ---- 파트너 고정(고정 조) 대진 ----
@@ -1566,12 +1633,18 @@ function streakFeasible(cfg){
 
 function buildSchedule(cfg){
   var cap = (cfg.n >= 6 && cfg.games >= 4);   // 6명 이상 · 1인당 4경기 이상일 때만 적용
+  // 혼복 하이브리드: 성별 불균형 시 혼복 + 다수 성별 동복 조합
+  var hp = hybridPlan(cfg);
+  if (hp && !cfg.fixed){
+    return buildHybridSchedule(cfg, hp, cap);
+  }
+  var rr = cfg.rounds || roundsFor(cfg);
   var best = null, bestScore = Infinity;
   for (var i=0;i<10;i++){
     var a = cfg.fixed
-      ? attemptFixed({ pairs:cfg.pairs, rounds:cfg.rounds, courts:cfg.courts,
+      ? attemptFixed({ pairs:cfg.pairs, rounds:rr, courts:cfg.courts,
                        lv:cfg.lv, anchor:true, cap:cap })
-      : attempt({ n:cfg.n, rounds:cfg.rounds, courts:cfg.courts, lv:cfg.lv,
+      : attempt({ n:cfg.n, rounds:rr, courts:cfg.courts, lv:cfg.lv,
                       type:cfg.type, genders:cfg.genders, anchor:true, cap:cap });
     var vio = 0;
     if (cap) streaksOf(a.rounds, cfg.n).forEach(function(m){ if (m >= 4) vio++; });
@@ -1580,6 +1653,29 @@ function buildSchedule(cfg){
     if (score === 0) break;
   }
   return best.rounds;
+}
+
+// 하이브리드 스케줄: 혼복 phase → 다수 성별 동복 phase
+function buildHybridSchedule(cfg, hp, cap){
+  // Phase 1: 혼복 라운드
+  var phase1 = attempt({
+    n: cfg.n, rounds: hp.mixedRounds, courts: cfg.courts, lv: cfg.lv,
+    type: "mixed", genders: cfg.genders, anchor: true, cap: cap
+  });
+  if (hp.sameRounds === 0) return phase1.rounds;
+  // Phase 2: 다수 성별만 뛰는 동복 라운드
+  var majorityIdx = [];
+  for (var i=0; i<cfg.n; i++){
+    var gi = cfg.genders[i];
+    if (hp.majorityGender === "M" && gi !== "F") majorityIdx.push(i);
+    if (hp.majorityGender === "F" && gi === "F") majorityIdx.push(i);
+  }
+  var phase2 = attempt({
+    n: cfg.n, rounds: hp.sameRounds, courts: cfg.courts, lv: cfg.lv,
+    type: "same", genders: cfg.genders, anchor: false, cap: cap,
+    seed: phase1.state, eligiblePool: majorityIdx
+  });
+  return phase1.rounds.concat(phase2.rounds);
 }
 
 // 복식이면 중복 페어 수, 단식이면 중복 대진 수
@@ -1660,12 +1756,46 @@ function genderSplit(cfg){
 }
 
 // 전원이 최소 g경기를 뛰려면 몇 라운드가 필요한지
+// 혼복 하이브리드 계산: 성별 불균형으로 소수 성별이 games+1을 초과하는 경우
+// → 혼복 라운드 + 다수 성별 동복 라운드로 분할
+// 반환: null (하이브리드 불필요) 또는 { mixedRounds, sameRounds, majorityGender: "M"|"F" }
+function hybridPlan(cfg){
+  if (cfg.type !== "mixed" || cfg.fixed) return null;
+  var g = genderSplit(cfg);
+  var M = g.M, F = g.F, C = cfg.courts, G = cfg.games;
+  if (M < 2 || F < 2) return null;   // 혼복 자체가 불가 (다른 곳에서 걸림)
+  var minority = Math.min(M, F);
+  var majority = Math.max(M, F);
+  var majorityGender = (M > F) ? "M" : "F";
+  // 다수가 same-sex 라운드 seats(=4C)를 채울 수 있어야 하이브리드 가능
+  if (majority < 4 * C) return null;
+  // 순수 혼복 라운드 수 (기존 공식)
+  var pureRounds = Math.ceil(G * majority / (C * 2));
+  // 소수 성별이 매 라운드 참여할 때 게임 수
+  var minorityGamesInPure = 2 * C * pureRounds / minority;
+  // games+1 이하면 하이브리드 불필요
+  if (minorityGamesInPure <= G + 1) return null;
+  // 소수가 딱 G 게임이 되도록 혼복 라운드 수 결정 (편차 최소화)
+  var idealMixed = Math.round(G * minority / (2 * C));
+  var maxMixed   = Math.floor((G + 1) * minority / (2 * C));
+  var mixedRounds = Math.max(0, Math.min(idealMixed, maxMixed));
+  // 다수의 남은 슬롯 = M×G - 혼복에서 얻은 슬롯
+  var majoritySlotsFromMixed = 2 * C * mixedRounds;
+  var majorityRemaining = majority * G - majoritySlotsFromMixed;
+  var sameRounds = Math.max(0, Math.ceil(majorityRemaining / (4 * C)));
+  // 안전 하한: 혼복 최소 1라운드 이상 (그래야 혼복 취지 유지)
+  if (mixedRounds < 1 && sameRounds > 0) return null;
+  return { mixedRounds: mixedRounds, sameRounds: sameRounds, majorityGender: majorityGender };
+}
+
 function roundsFor(cfg){
   if (cfg.fixed){   // 조 단위 — 한 라운드에 코트수×2 조가 뛴다
     var T = Math.floor(cfg.n/2);
     return Math.ceil(T * cfg.games / (cfg.courts * 2));
   }
   if (cfg.type === "mixed"){
+    var hp = hybridPlan(cfg);
+    if (hp) return hp.mixedRounds + hp.sameRounds;
     var g = genderSplit(cfg);
     return Math.ceil(cfg.games * Math.max(g.M, g.F) / (cfg.courts * 2));
   }
@@ -3036,20 +3166,84 @@ Store.get().then(function(saved){
 var authMode = "signin";  // 'signin' | 'signup'
 
 function refreshAuthUI(){
-  var btn = $("#btn-auth"), roomBtn = $("#btn-room"), admBtn = $("#btn-admin");
+  var btn = $("#btn-auth"), roomBtn = $("#btn-room"), admBtn = $("#btn-admin"), meBtn = $("#btn-me");
   if (!btn) return;
   if (Me){
-    btn.textContent = Me.nickname + " · 로그아웃";
+    btn.textContent = "로그아웃";
     if (roomBtn){ roomBtn.hidden = false; roomBtn.textContent = Room.code ? ("코트 " + Room.code) : "코트"; roomBtn.classList.toggle("on", !!Room.code); }
     if (admBtn){ admBtn.hidden = !Me.is_admin; }
+    if (meBtn){ meBtn.hidden = false; meBtn.textContent = Me.nickname; }
   } else {
     btn.textContent = "로그인";
     if (roomBtn){ roomBtn.hidden = true; }
     if (admBtn){ admBtn.hidden = true; }
+    if (meBtn){ meBtn.hidden = true; }
   }
   // 저장 바의 클라우드 저장 버튼 상태도 갱신
   renderSaveBar();
   if (S.tab === "history") renderHistory();
+}
+
+// 마이페이지 모달
+function openMyPage(){
+  if (!Me) return;
+  var host = $("#mMe-body");
+  host.innerHTML =
+    '<div class="me-section">' +
+      '<p class="eyebrow">계정</p>' +
+      '<div class="me-row"><span class="me-k">닉네임</span><span class="me-v"><b>' + esc(Me.nickname) + '</b>' + (Me.is_admin ? ' <span class="badge b-admin">ADMIN</span>' : '') + '</span></div>' +
+      '<div class="me-row"><span class="me-k">비밀번호(PIN)</span><span class="me-v">••••  <button class="btn ghost" id="mMe-pin" type="button" style="padding:4px 12px;font-size:12px;margin-left:8px">변경</button></span></div>' +
+    '</div>' +
+    '<div class="me-section" style="margin-top:20px">' +
+      '<p class="eyebrow">지난 경기 이력</p>' +
+      '<div id="mMe-hist"><div class="empty">불러오는 중…</div></div>' +
+    '</div>' +
+    '<div class="modal-actions" style="margin-top:20px">' +
+      '<button class="btn ghost" id="mMe-logout" type="button">로그아웃</button>' +
+    '</div>';
+  $("#mMe").hidden = false;
+  // 이력 로드
+  listMySessions(50).then(function(rows){
+    var h = $("#mMe-hist");
+    if (!rows.length){ h.innerHTML = '<div class="empty">저장된 이력이 없습니다</div>'; return; }
+    h.innerHTML = '<div class="me-hist">' + rows.map(function(s){
+      var snap = s.snapshot || {};
+      var pr = snap.schedule ? progressOf(snap) : {done:0, all:0};
+      var meta = (snap.count ? snap.count + "명" : "?명")
+        + (snap.schedule ? " · " + snap.schedule.length + "R" : "")
+        + " · " + pr.done + "/" + pr.all + "경기"
+        + (s.room_code ? " · 코트 " + s.room_code : " · 솔로");
+      return '<button class="me-hist-item" data-sid="' + esc(s.id) + '">' +
+        '<div class="me-hist-d">' + fmtDateFull(s.played_on) + '</div>' +
+        '<div class="me-hist-m">' + esc(meta) + '</div>' +
+      '</button>';
+    }).join("") + '</div>';
+    h.querySelectorAll(".me-hist-item").forEach(function(b){
+      b.addEventListener("click", function(){
+        var sid = this.dataset.sid;
+        var s = rows.filter(function(r){ return r.id === sid; })[0];
+        if (!s || !s.snapshot) return;
+        $("#mMe").hidden = true;
+        startNewFromView(); scrollMem = {};
+        hydrate(s.snapshot);
+        DB.current = S.sessionId; S.tab = "sched"; render(); window.scrollTo({top:0});
+        toast("이력 열림");
+      });
+    });
+  })["catch"](function(e){ $("#mMe-hist").innerHTML = '<div class="empty" style="color:#8f2f2f">' + esc(e.message || e) + '</div>'; });
+  // 버튼
+  $("#mMe-pin").addEventListener("click", function(){
+    $("#mMe").hidden = true;
+    $("#mPin-cur").value = ""; $("#mPin-new").value = ""; $("#mPin-new2").value = "";
+    $("#mPin-err").textContent = "";
+    $("#mPin").hidden = false;
+  });
+  $("#mMe-logout").addEventListener("click", function(){
+    if (!confirm("로그아웃 하시겠어요?")) return;
+    $("#mMe").hidden = true;
+    signOut(); refreshAuthUI(); if (S.tab === "history") renderHistory();
+    toast("로그아웃");
+  });
 }
 
 function toast(msg){
@@ -3305,6 +3499,18 @@ function bindAuthUI(){
     } else { openAuthModal(); }
   });
   $("#btn-admin").addEventListener("click", openAdminModal);
+  $("#btn-me").addEventListener("click", openMyPage);
+  // PIN 변경 submit
+  $("#mPin-submit").addEventListener("click", function(){
+    var cur = $("#mPin-cur").value.trim();
+    var nw  = $("#mPin-new").value.trim();
+    var nw2 = $("#mPin-new2").value.trim();
+    if (nw !== nw2){ $("#mPin-err").textContent = "새 PIN이 서로 다릅니다"; return; }
+    changePin(cur, nw).then(function(){
+      $("#mPin").hidden = true;
+      toast("PIN 변경 완료");
+    })["catch"](function(e){ $("#mPin-err").textContent = e.message || String(e); });
+  });
   // 관리자 탭 전환
   d.querySelectorAll(".admin-tab").forEach(function(b){
     b.addEventListener("click", function(){

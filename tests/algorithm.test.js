@@ -15,11 +15,31 @@ const MODES = [
   { kind: "mixed",  type: "mixed",  perCourt: 4, label: "혼성/고정조", partner: "fixed" },
 ];
 
+// 하이브리드 계획 (본문 hybridPlan과 동일 로직)
+function hybridPlanTest(men, women, courts, games) {
+  const minority = Math.min(men, women), majority = Math.max(men, women);
+  if (minority < 2) return null;
+  if (majority < 4 * courts) return null;
+  const pureRounds = Math.ceil(games * majority / (courts * 2));
+  const minorityInPure = 2 * courts * pureRounds / minority;
+  if (minorityInPure <= games + 1) return null;
+  const idealMixed = Math.round(games * minority / (2 * courts));
+  const maxMixed = Math.floor((games + 1) * minority / (2 * courts));
+  const mixedRounds = Math.max(0, Math.min(idealMixed, maxMixed));
+  if (mixedRounds < 1) return null;
+  const majoritySlots = 2 * courts * mixedRounds;
+  const majorityRem = majority * games - majoritySlots;
+  const sameRounds = Math.max(0, Math.ceil(majorityRem / (4 * courts)));
+  return { mixedRounds, sameRounds };
+}
+
 // 사양서 2-4 / 2-7 의 라운드 수 공식을 테스트 쪽에서 독립적으로 다시 계산한다
 function expectedRounds(M, n, courts, games) {
   if (M.partner === "fixed") return Math.ceil(Math.floor(n / 2) * games / (courts * 2));
   if (M.type === "mixed") {
     const men = Math.ceil(n / 2), women = Math.floor(n / 2);   // 기본 성별은 남·여 번갈아
+    const hp = hybridPlanTest(men, women, courts, games);
+    if (hp) return hp.mixedRounds + hp.sameRounds;
     return Math.ceil(games * Math.max(men, women) / (courts * 2));
   }
   return Math.ceil(n * games / (courts * M.perCourt));
@@ -100,9 +120,15 @@ function groupsOf(M, n) {
             sched.forEach((r, ri) => r.forEach((m, ci) => {
               if (m[0].length !== M.perCourt / 2 || m[1].length !== M.perCourt / 2) note(tag, "팀 인원 오류");
               if (M.type === "mixed") {
-                [m[0], m[1]].forEach(t => {
-                  if (t.filter(x => x % 2 === 0).length !== 1) note(tag, `혼성 팀이 남1·여1이 아니다 R${ri + 1}C${ci + 1} [${t}]`);
-                });
+                // 하이브리드 same-sex 라운드는 동성 팀 허용 (전원 M 또는 전원 F 모두 OK)
+                const allP = m[0].concat(m[1]);
+                const mCount = allP.filter(x => x % 2 === 0).length;
+                const isPureMixed = m[0].filter(x => x % 2 === 0).length === 1
+                                 && m[1].filter(x => x % 2 === 0).length === 1;
+                const isAllMale   = mCount === allP.length;
+                const isAllFemale = mCount === 0;
+                if (!isPureMixed && !isAllMale && !isAllFemale)
+                  note(tag, `혼성 팀 구성 위반 R${ri + 1}C${ci + 1} [${m[0]}] vs [${m[1]}]`);
               }
               if (M.partner === "fixed") {
                 [m[0], m[1]].forEach(t => {
