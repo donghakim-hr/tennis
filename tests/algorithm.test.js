@@ -7,7 +7,7 @@
 // 실행: node tests/algorithm.test.js   (약 1~2분)
 const { boot, click, pickMode, fillNames, readSchedule, reporter } = require("./lib");
 
-const GAMES = [2, 4, 6];
+const GAMES = [2, 3, 4, 5];   // 앱 UI의 게임 옵션 (2·3·4·5)
 const MODES = [
   { kind: "single", type: "single", perCourt: 2, label: "단식" },
   { kind: "same",   type: "same",   perCourt: 4, label: "동성" },
@@ -70,7 +70,9 @@ function groupsOf(M, n) {
         for (const courts of courtOptions()) {
           click(w, $$("#c-chips button").find(b => +b.dataset.c === courts));
           for (const games of GAMES) {
-            click(w, $$("#r-chips button").find(b => +b.dataset.r === games));
+            const gBtn = $$("#r-chips button").find(b => +b.dataset.r === games);
+            if (!gBtn) continue;                                // UI에 그 게임 옵션이 없으면 스킵
+            click(w, gBtn);
             if ($("#make").disabled) continue;                  // 설정이 불가능한 조합은 건너뛴다
             fillNames(ctx, "p");
             click(w, $("#make"));

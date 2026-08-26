@@ -723,7 +723,9 @@ var CONST = {
   AUTH: {
     NICK_MIN: 2, NICK_MAX: 20,
     PIN_RE:   /^\d{4}$/
-  }
+  },
+  MAX_COUNT: 24,                    // 최대 참가 인원
+  GAMES: [2, 3, 4, 5]               // 1인당 경기 수 옵션
 };
 
 // 공통 에러 처리: catch 콜백 만들어 반환 (toast + 콘솔)
@@ -1152,8 +1154,20 @@ function fmtDateFull(s){
 
 /* ---------------- state ---------------- */
 var DB = { sessions: {}, current: null };   // sessions: { "YYYY-MM-DD": snapshot }
+// 세션 키 생성 — 하루에 여러 세션 지원 (YYYY-MM-DD#HHMMSS)
+function newSessionId(date){
+  var d = new Date();
+  function pad(n){ return (n<10?"0":"") + n; }
+  return (date || todayStr()) + "#" + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+}
+// 세션 키가 legacy(순수 날짜)인지 확인
+function isLegacyKey(k){ return typeof k === "string" && k.length === 10 && k.indexOf("#") < 0; }
+// 세션 키에서 날짜 부분 추출
+function dateOfKey(k){ return isLegacyKey(k) ? k : String(k).split("#")[0]; }
+
 var S = {
   date: todayStr(),
+  sessionId: null,  // DB.sessions의 키. null이면 저장 시 새로 발급
   mode: null,       // "single" | "double"  (null이면 종목 선택 화면)
   pair: "same",     // 복식일 때 "same"(동성) | "mixed"(혼성)
   genders: [],      // 혼복 전용: "M" | "F"
@@ -1173,14 +1187,17 @@ var S = {
 var viewOnly = false;   // 공유 링크로 열었을 때 (읽기 전용, 기기에 저장하지 않음)
 
 function snapshot(){
-  return { date:S.date, mode:S.mode, pair:S.pair, genders:S.genders.slice(),
+  return { date:S.date, sessionId:S.sessionId,
+           mode:S.mode, pair:S.pair, genders:S.genders.slice(),
            count:S.count, courts:S.courts, courtNames:(S.courtNames||[]).slice(),
            games:S.games, names:S.names.slice(),
            levels:S.levels.slice(), useLevel:S.useLevel, mixPartner:S.mixPartner,
            schedule:S.schedule, sort:S.sort, savedAt:S.savedAt };
 }
 function hydrate(s){
-  S.date = s.date; S.count = s.count; S.games = s.games || s.rounds || 4;
+  S.date = s.date;
+  S.sessionId = s.sessionId || null;   // legacy 세션은 sessionId 없음
+  S.count = s.count; S.games = s.games || s.rounds || 4;
   S.mode = s.mode || "double"; S.pair = s.pair || "same";
   S.genders = (s.genders || []).slice();
   S.courts = s.courts || maxCourts(s.count, S.mode);
@@ -1194,7 +1211,11 @@ function hydrate(s){
 }
 function save(){
   if (viewOnly) return;   // 공유 링크로 본 결과는 기기에 남기지 않는다
-  if (S.schedule && S.date){ DB.sessions[S.date] = snapshot(); DB.current = S.date; }
+  if (S.schedule && S.date){
+    if (!S.sessionId) S.sessionId = newSessionId(S.date);
+    DB.sessions[S.sessionId] = snapshot();
+    DB.current = S.sessionId;
+  }
   Store.set(DB);
   // 방에 접속 중이면 원격 상태도 push (실시간 동기화)
   pushRoomState();
@@ -1212,8 +1233,18 @@ function autosave(){
 
 var courtTouched = false;   // 사용자가 코트 수를 직접 고르면 자동 보정 중단
 var scrollMem = {};         // 탭별 스크롤 위치 (탭을 왕복해도 보던 코트로 돌아온다)
+// 세션 키 최신순 정렬. 신규 키(YYYY-MM-DD#HHMMSS)는 시간까지 반영,
+// legacy(YYYY-MM-DD)는 문자열 비교로도 신규 앞에 오게 sort → reverse
 function dateKeys(){
   return Object.keys(DB.sessions).sort().reverse();
+}
+// 세션 키를 "8월 26일 (수) 14:30" 형태로
+function fmtSessionKey(k){
+  var date = dateOfKey(k);
+  var label = fmtDateFull(date);
+  var t = isLegacyKey(k) ? "" : String(k).split("#")[1];
+  if (t && t.length >= 4) label += " " + t.slice(0,2) + ":" + t.slice(2,4);
+  return label;
 }
 
 /* ---------------- matching algorithm ---------------- */
@@ -1915,7 +1946,7 @@ function loadIntroCourts(){
 function finishIntro(){
   introStep = 0;
   courtTouched = false;
-  S.schedule = null; DB.current = null; S.savedAt = null; dirty = false;
+  S.schedule = null; S.sessionId = null; DB.current = null; S.savedAt = null; dirty = false;
   var mn = minPlayers(S.mode);
   if (S.count < mn) S.count = mn === 2 ? 4 : 8;
   if (S.mode === "single" || S.pair !== "mixed") S.genders = [];
@@ -2044,7 +2075,7 @@ function renderSetup(){
   var mn = minPlayers(S.mode);
   $("#p-val").textContent = S.count;
   $("#p-minus").disabled = S.count <= mn;
-  $("#p-plus").disabled  = S.count >= 16;
+  $("#p-plus").disabled  = S.count >= CONST.MAX_COUNT;
   $("#p-range").textContent = mn + " – 16";
 
   ensureLevels();
@@ -2157,12 +2188,12 @@ function renderSetup(){
 
   var chips = $("#r-chips");
   if (!chips.children.length){
-    for (var i=2;i<=6;i++){
+    CONST.GAMES.forEach(function(gi){
       var b2 = document.createElement("button");
-      b2.className = "chip"; b2.textContent = i; b2.dataset.r = i;
+      b2.className = "chip"; b2.textContent = gi; b2.dataset.r = gi;
       b2.addEventListener("click", function(){ S.games = +this.dataset.r; renderSetup(); save(); });
       chips.appendChild(b2);
-    }
+    });
   }
   Array.prototype.forEach.call(chips.children, function(b){
     b.setAttribute("aria-pressed", +b.dataset.r === S.games ? "true" : "false");
@@ -2295,11 +2326,13 @@ function renderSetup(){
 
   // 지난 경기 명단 불러오기 — 매 회차 이름 16개를 다시 타이핑하지 않도록
   var lastKey = null, keys = dateKeys();
-  for (var q=0;q<keys.length;q++){ if (keys[q] !== S.date){ lastKey = keys[q]; break; } }
+  // 현재 세션과 다른 가장 최근 세션을 찾는다 (같은 날 다른 시간대도 포함)
+  var curKey = S.sessionId || S.date;
+  for (var q=0;q<keys.length;q++){ if (keys[q] !== curKey){ lastKey = keys[q]; break; } }
   var lr = $("#load-roster");
   lr.hidden = !lastKey;
   if (lastKey){
-    lr.textContent = fmtDate(lastKey) + " 명단 불러오기 (" + DB.sessions[lastKey].count + "명)";
+    lr.textContent = fmtSessionKey(lastKey) + " 명단 불러오기 (" + DB.sessions[lastKey].count + "명)";
     lr.dataset.d = lastKey;
   }
 
@@ -2550,9 +2583,9 @@ function renderHistory(){
     var top = pr.done ? stats(sess)[0] : null;
     var pcS = perCourt(sess.mode), slotsS = sess.schedule.length * courtsOf(sess) * pcS;
     var L = "1인당 " + Math.floor(slotsS / sess.count) + "경기";
-    return '<div class="hist-item' + (k === S.date && S.schedule ? " on" : "") + '">' +
+    return '<div class="hist-item' + (k === (S.sessionId || S.date) && S.schedule ? " on" : "") + '">' +
       '<button class="hist-open" data-d="' + k + '">' +
-        '<div class="hist-d">' + fmtDateFull(k) + '</div>' +
+        '<div class="hist-d">' + fmtSessionKey(k) + '</div>' +
         '<div class="hist-m">' + modeLabel(sess) + " · " + sess.count + "명 · 코트 " + courtsOf(sess) + "면 · " + sess.schedule.length + "라운드 · " + L +
           " · " + pr.done + "/" + pr.all + "경기 입력" +
           (top ? ' · 1위 <b>' + esc(nameIn(sess, top.i)) + '</b>' : "") +
@@ -2581,16 +2614,18 @@ function renderHistory(){
     b.addEventListener("click", function(){
       startNewFromView();
       scrollMem = {};
-      hydrate(DB.sessions[this.dataset.d]);
-      DB.current = S.date; S.tab = "sched"; render(); save(); window.scrollTo({top:0});
+      var key = this.dataset.d;
+      hydrate(DB.sessions[key]);
+      if (!S.sessionId) S.sessionId = key;   // legacy 세션이면 key 자체를 id로
+      DB.current = S.sessionId; S.tab = "sched"; render(); save(); window.scrollTo({top:0});
     });
   });
   Array.prototype.forEach.call(host.querySelectorAll(".hist-del"), function(b){
     b.addEventListener("click", function(){
       var d = this.dataset.d;
-      if (!confirm(fmtDateFull(d) + " 기록을 삭제합니다.")) return;
+      if (!confirm(fmtSessionKey(d) + " 기록을 삭제합니다.")) return;
       delete DB.sessions[d];
-      if (S.date === d){ S.schedule = null; DB.current = null; }
+      if ((S.sessionId || S.date) === d){ S.schedule = null; S.sessionId = null; DB.current = null; }
       renderHistory(); render(); Store.set(DB); toast("삭제했습니다");
     });
   });
@@ -2604,7 +2639,7 @@ function startNew(){
   startNewFromView();
   scrollMem = {};
   courtTouched = false;
-  S.schedule = null; DB.current = null; S.savedAt = null; dirty = false;
+  S.schedule = null; S.sessionId = null; DB.current = null; S.savedAt = null; dirty = false;
   S.date = todayStr(); S.tab = "sched";
   render(); window.scrollTo({top:0});
 }
@@ -2758,7 +2793,7 @@ $("#p-minus").addEventListener("click", function(){
   // 코트 상한 보정은 renderSetup이 종목·성별·고정조를 모두 반영해 처리한다
   if (S.count > minPlayers(S.mode)){ S.count--; if (S.pair === "mixed") ensureGenders(); renderSetup(); save(); }
 });
-$("#p-plus").addEventListener("click",  function(){ if (S.count<16){ S.count++; if(S.pair==="mixed") ensureGenders(); renderSetup(); save(); } });
+$("#p-plus").addEventListener("click",  function(){ if (S.count<CONST.MAX_COUNT){ S.count++; if(S.pair==="mixed") ensureGenders(); renderSetup(); save(); } });
 $("#tab-sched").addEventListener("click", function(){ goTab("sched"); });
 $("#tab-summary").addEventListener("click", function(){ goTab("summary"); });
 $("#tab-rank").addEventListener("click",  function(){ goTab("rank"); });
@@ -2800,7 +2835,7 @@ $("#make").addEventListener("click", function(){
   startNewFromView();
   scrollMem = {};
   S.date = $("#date").value || todayStr();
-  if (DB.sessions[S.date] && !confirm(fmtDateFull(S.date) + " 기록이 이미 있습니다. 새로 만들면 기존 결과가 사라집니다.")) return;
+  S.sessionId = newSessionId(S.date);   // 하루 여러 세션 허용 — 항상 새 키 발급
   S.names.length = S.count;
   S.schedule = buildSchedule(genCfg());
   S.savedAt = null; dirty = false;
