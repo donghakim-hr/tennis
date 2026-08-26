@@ -806,22 +806,36 @@ function setMe(u){
 }
 
 // 서버에서 is_admin 조회 (컬럼이 없어도 false로 그레이스풀 처리)
+// app_users_public 뷰 사용 (pin_hash/salt 노출 없음)
 function fetchIsAdmin(userId){
   if (!sb || !userId) return Promise.resolve(false);
-  return sb.from("app_users").select("is_admin").eq("id", userId).maybeSingle()
+  return sb.from("app_users_public").select("is_admin").eq("id", userId).maybeSingle()
     .then(function(res){ return !!(res.data && res.data.is_admin); })
-    ["catch"](function(){ return false; });
+    ["catch"](function(){
+      // 뷰가 아직 안 만들어졌으면 legacy 테이블 폴백
+      return sb.from("app_users").select("is_admin").eq("id", userId).maybeSingle()
+        .then(function(r2){ return !!(r2.data && r2.data.is_admin); })
+        ["catch"](function(){ return false; });
+    });
 }
 
 // 앱 시작 시 서버에서 사용자·admin 재확인
 function refreshMeFromServer(){
   if (!sb || !Me) return Promise.resolve();
-  return sb.from("app_users").select("id,nickname").eq("id", Me.id).maybeSingle()
+  return sb.from("app_users_public").select("id,nickname,is_admin").eq("id", Me.id).maybeSingle()
     .then(function(res){
-      if (!res.data){ setMe(null); return; }   // 서버에 없는 계정이면 로그아웃
-      return fetchIsAdmin(res.data.id).then(function(isAdmin){
-        setMe({ id: res.data.id, nickname: res.data.nickname, is_admin: isAdmin });
-      });
+      if (res.data){
+        setMe({ id: res.data.id, nickname: res.data.nickname, is_admin: !!res.data.is_admin });
+        return;
+      }
+      // 뷰 없으면 legacy 테이블 폴백
+      return sb.from("app_users").select("id,nickname").eq("id", Me.id).maybeSingle()
+        .then(function(r2){
+          if (!r2.data){ setMe(null); return; }
+          return fetchIsAdmin(r2.data.id).then(function(isAdmin){
+            setMe({ id: r2.data.id, nickname: r2.data.nickname, is_admin: isAdmin });
+          });
+        });
     })["catch"](function(){ /* 오프라인은 무시 */ });
 }
 
@@ -841,45 +855,41 @@ function hashPin(pin, salt){
   return (window.crypto || window.msCrypto).subtle.digest("SHA-256", enc).then(toHex);
 }
 
-// 회원가입: 닉네임 + 4자리 PIN
+// PostgREST 에러 메시지를 사용자 친화적 문구로 변환
+function mapAuthErr(err){
+  var msg = (err && err.message) ? err.message : String(err);
+  if (/PIN_INVALID/.test(msg)) return new Error("PIN은 숫자 4자리");
+  if (/NICKNAME_INVALID/.test(msg)) return new Error("닉네임은 2~20자");
+  if (/NICKNAME_TAKEN/.test(msg)) return new Error("이미 쓰는 닉네임입니다");
+  if (/PIN_MISMATCH/.test(msg)) return new Error("현재 PIN이 틀립니다");
+  if (/NOT_FOUND/.test(msg)) return new Error("계정을 찾을 수 없습니다");
+  return new Error(msg);
+}
+
+// 회원가입: 서버측 RPC create_account (pin_hash 는 서버에서 생성)
 function signUp(nickname, pin){
   if (!sb) return Promise.reject(new Error("Supabase 설정이 없습니다"));
   if (!/^\d{4}$/.test(pin)) return Promise.reject(new Error("PIN은 숫자 4자리"));
   if (!nickname || nickname.length < 2 || nickname.length > 20) return Promise.reject(new Error("닉네임은 2~20자"));
-  var salt = randSalt();
-  return hashPin(pin, salt).then(function(hash){
-    return sb.from("app_users").insert({ nickname: nickname, pin_hash: hash, pin_salt: salt })
-      .select("id,nickname").single();
-  }).then(function(res){
-    if (res.error){
-      if (res.error.code === "23505") throw new Error("이미 쓰는 닉네임입니다");
-      throw new Error(res.error.message);
-    }
-    return fetchIsAdmin(res.data.id).then(function(isAdmin){
-      var u = { id: res.data.id, nickname: res.data.nickname, is_admin: isAdmin };
-      setMe(u);
-      return u;
+  return sb.rpc("create_account", { p_nickname: nickname, p_pin: pin })
+    .then(function(res){
+      if (res.error) throw mapAuthErr(res.error);
+      var data = res.data || {};
+      var u = { id: data.id, nickname: data.nickname, is_admin: !!data.is_admin };
+      setMe(u); return u;
     });
-  });
 }
 
-// 로그인: 닉네임으로 salt 조회 → 해시 비교 (is_admin은 별도 조회, 컬럼 없어도 false)
+// 로그인: 서버측 RPC verify_pin (pin_hash 클라이언트 노출 없음)
 function signIn(nickname, pin){
   if (!sb) return Promise.reject(new Error("Supabase 설정이 없습니다"));
-  return sb.from("app_users").select("id,nickname,pin_hash,pin_salt").eq("nickname", nickname).maybeSingle()
+  return sb.rpc("verify_pin", { p_nickname: nickname, p_pin: pin })
     .then(function(res){
-      if (res.error) throw new Error(res.error.message);
-      if (!res.data)  throw new Error("없는 닉네임입니다");
-      return hashPin(pin, res.data.pin_salt).then(function(h){
-        if (h !== res.data.pin_hash) throw new Error("PIN이 틀립니다");
-        return fetchIsAdmin(res.data.id).then(function(isAdmin){
-          var u = { id: res.data.id, nickname: res.data.nickname, is_admin: isAdmin };
-          setMe(u);
-          // 마지막 접속 시각 업데이트 (실패해도 무시)
-          sb.from("app_users").update({ last_seen_at: new Date().toISOString() }).eq("id", u.id).then(function(){});
-          return u;
-        });
-      });
+      if (res.error) throw mapAuthErr(res.error);
+      if (!res.data) throw new Error("닉네임 또는 PIN이 틀립니다");
+      var data = res.data;
+      var u = { id: data.id, nickname: data.nickname, is_admin: !!data.is_admin };
+      setMe(u); return u;
     });
 }
 
@@ -889,21 +899,14 @@ function signOut(){
   setMe(null);
 }
 
-// PIN 변경 (현재 PIN 확인 후 새 salt/hash로 교체)
+// PIN 변경: 서버측 RPC change_pin
 function changePin(curPin, newPin){
   if (!sb || !Me) return Promise.reject(new Error("로그인 필요"));
   if (!/^\d{4}$/.test(newPin)) return Promise.reject(new Error("PIN은 숫자 4자리"));
-  return sb.from("app_users").select("pin_hash,pin_salt").eq("id", Me.id).maybeSingle()
+  return sb.rpc("change_pin", { p_user_id: Me.id, p_cur_pin: curPin, p_new_pin: newPin })
     .then(function(res){
-      if (res.error || !res.data) throw new Error("계정 조회 실패");
-      return hashPin(curPin, res.data.pin_salt).then(function(h){
-        if (h !== res.data.pin_hash) throw new Error("현재 PIN이 틀립니다");
-        var newSalt = randSalt();
-        return hashPin(newPin, newSalt).then(function(newHash){
-          return sb.from("app_users").update({ pin_hash: newHash, pin_salt: newSalt }).eq("id", Me.id)
-            .then(function(r2){ if (r2.error) throw new Error(r2.error.message); });
-        });
-      });
+      if (res.error) throw mapAuthErr(res.error);
+      return res.data;
     });
 }
 
@@ -1025,20 +1028,31 @@ function closeRoom(){
 }
 
 /* ---------------- 관리자 전용 ---------------- */
-function listAllUsersAdmin(){
-  if (!sb) return Promise.resolve([]);
-  // is_admin 컬럼이 있는지 모르니 * 로 조회 (없으면 undefined 처리)
-  return sb.from("app_users").select("id,nickname,created_at,last_seen_at,is_admin")
-    .order("created_at", {ascending:false})
-    .then(function(res){
-      if (res.error){
-        // 마이그레이션 전이라 is_admin 컬럼이 없을 수 있음 → is_admin 없이 재시도
-        return sb.from("app_users").select("id,nickname,created_at,last_seen_at")
-          .order("created_at", {ascending:false})
-          .then(function(r2){ return (r2.data || []).map(function(u){ u.is_admin = false; return u; }); });
-      }
-      return res.data || [];
-    });
+// 관리자용 회원 목록 - 페이지네이션 + 닉네임 검색
+// { rows: [...], total: N }
+function listAllUsersAdmin(search, limit, offset){
+  if (!sb) return Promise.resolve({ rows: [], total: 0 });
+  var params = { p_search: search || null, p_limit: limit || 50, p_offset: offset || 0 };
+  return sb.rpc("admin_list_users", params).then(function(res){
+    if (res.error) throw res.error;
+    var rows = res.data || [];
+    var total = rows.length ? Number(rows[0].total_count) : 0;
+    return { rows: rows, total: total };
+  })["catch"](function(){
+    // RPC 없으면 (구 마이그레이션 상태) view 사용해 폴백
+    return sb.from("app_users_public").select("id,nickname,is_admin,created_at,last_seen_at", { count: "exact" })
+      .ilike("nickname", search ? "%" + search + "%" : "%")
+      .order("created_at", { ascending: false })
+      .range(offset || 0, (offset || 0) + (limit || 50) - 1)
+      .then(function(r2){ return { rows: r2.data || [], total: r2.count || 0 }; })
+      ["catch"](function(){
+        return sb.from("app_users").select("id,nickname,is_admin,created_at,last_seen_at", { count: "exact" })
+          .ilike("nickname", search ? "%" + search + "%" : "%")
+          .order("created_at", { ascending: false })
+          .range(offset || 0, (offset || 0) + (limit || 50) - 1)
+          .then(function(r3){ return { rows: r3.data || [], total: r3.count || 0 }; });
+      });
+  });
 }
 
 function listAllRoomsAdmin(){
@@ -1129,12 +1143,15 @@ function saveSession(playerName, mappings){
   });
 }
 
-function listMySessions(limit){
+// 개인 이력 페이지네이션: offset 기반. 반환은 배열 (기존 호환)
+function listMySessions(limit, offset){
   if (!sb || !Me) return Promise.resolve([]);
+  var lim = limit || 30, off = offset || 0;
   return sb.from("user_sessions")
     .select("player_name, session_id, sessions(id, played_on, snapshot, room_code, created_at)")
     .eq("user_id", Me.id)
-    .order("session_id", {ascending:false}).limit(limit||30)
+    .order("session_id", {ascending:false})
+    .range(off, off + lim - 1)
     .then(function(res){
       return (res.data || []).map(function(r){
         if (!r.sessions) return null;
@@ -2738,7 +2755,7 @@ function renderHistory(){
     '<div style="margin-top:16px"><button class="btn" id="hist-new" style="width:100%">새 경기 시작</button></div>';
 
   // 클라우드 이력 로드 (비동기)
-  if (Me) loadCloudHistory();
+  if (Me) loadCloudHistory(true);
 
   Array.prototype.forEach.call(host.querySelectorAll(".hist-open"), function(b){
     b.addEventListener("click", function(){
@@ -3202,11 +3219,12 @@ function openMyPage(){
       '<button class="btn ghost" id="mMe-logout" type="button">로그아웃</button>' +
     '</div>';
   $("#mMe").hidden = false;
-  // 이력 로드
-  listMySessions(50).then(function(rows){
+  // 이력 로드 - 30개씩 페이지네이션, "더 보기"로 확장
+  var myPageState = { rows: [] };
+  function renderMyPageHist(){
     var h = $("#mMe-hist");
-    if (!rows.length){ h.innerHTML = '<div class="empty">저장된 이력이 없습니다</div>'; return; }
-    h.innerHTML = '<div class="me-hist">' + rows.map(function(s){
+    if (!myPageState.rows.length){ h.innerHTML = '<div class="empty">저장된 이력이 없습니다</div>'; return; }
+    h.innerHTML = '<div class="me-hist">' + myPageState.rows.map(function(s){
       var snap = s.snapshot || {};
       var pr = snap.schedule ? progressOf(snap) : {done:0, all:0};
       var meta = (snap.count ? snap.count + "명" : "?명")
@@ -3217,11 +3235,14 @@ function openMyPage(){
         '<div class="me-hist-d">' + fmtDateFull(s.played_on) + '</div>' +
         '<div class="me-hist-m">' + esc(meta) + '</div>' +
       '</button>';
-    }).join("") + '</div>';
+    }).join("") + '</div>' +
+    '<div style="margin-top:10px;text-align:center">' +
+      '<button class="btn ghost" id="mMe-more" type="button" style="padding:6px 14px;font-size:12px">더 보기</button>' +
+    '</div>';
     h.querySelectorAll(".me-hist-item").forEach(function(b){
       b.addEventListener("click", function(){
         var sid = this.dataset.sid;
-        var s = rows.filter(function(r){ return r.id === sid; })[0];
+        var s = myPageState.rows.filter(function(r){ return r.id === sid; })[0];
         if (!s || !s.snapshot) return;
         $("#mMe").hidden = true;
         startNewFromView(); scrollMem = {};
@@ -3230,7 +3251,19 @@ function openMyPage(){
         toast("이력 열림");
       });
     });
-  })["catch"](function(e){ $("#mMe-hist").innerHTML = '<div class="empty" style="color:#8f2f2f">' + esc(e.message || e) + '</div>'; });
+    var mmb = $("#mMe-more");
+    if (mmb) mmb.addEventListener("click", loadMyPageMore);
+  }
+  function loadMyPageMore(){
+    listMySessions(30, myPageState.rows.length).then(function(rows){
+      myPageState.rows = myPageState.rows.concat(rows);
+      renderMyPageHist();
+      if (rows.length < 30){
+        var mb = $("#mMe-more"); if (mb) mb.parentNode.removeChild(mb.parentNode);
+      }
+    })["catch"](function(e){ $("#mMe-hist").innerHTML = '<div class="empty" style="color:#8f2f2f">' + esc(e.message || e) + '</div>'; });
+  }
+  loadMyPageMore();
   // 버튼
   $("#mMe-pin").addEventListener("click", function(){
     $("#mMe").hidden = true;
@@ -3354,33 +3387,55 @@ function openMapModal(onSubmit){
 }
 
 // 기록 탭의 클라우드 이력 섹션 렌더
-function loadCloudHistory(){
+var cloudHistState = { rows: [], loading: false };
+function renderCloudHistList(host){
+  var rows = cloudHistState.rows;
+  if (!rows.length){
+    host.innerHTML = '<div class="card"><p class="empty">저장된 이력이 없습니다. 대진표 화면에서 <b>내 이력에 저장</b> 버튼을 눌러 저장하세요.</p></div>';
+    return;
+  }
+  host.innerHTML = '<div class="hist">' + rows.map(function(s){
+    var snap = s.snapshot || {};
+    var pr = snap.schedule ? progressOf(snap) : {done:0, all:0};
+    var meta = (snap.count ? snap.count + "명" : "?명")
+      + (snap.schedule ? " · " + snap.schedule.length + "라운드" : "")
+      + " · " + pr.done + "/" + pr.all + "경기 입력"
+      + (s.room_code ? " · 코트 " + s.room_code : " · 솔로");
+    return '<div class="hist-item">' +
+      '<button class="hist-open" data-sid="' + esc(s.id) + '">' +
+        '<div class="hist-d">' + fmtDateFull(s.played_on) + '</div>' +
+        '<div class="hist-m">' + esc(meta) + '</div>' +
+      '</button>' +
+    '</div>';
+  }).join("") + '</div>' +
+  '<div style="margin-top:10px;text-align:center">' +
+    '<button class="btn ghost" id="cloud-more" type="button" style="padding:8px 16px;font-size:13px">더 보기</button>' +
+  '</div>';
+}
+function loadCloudHistory(reset){
   var host = $("#cloud-hist");
   if (!host) return;
-  listMySessions(30).then(function(rows){
-    if (!rows.length){
-      host.innerHTML = '<div class="card"><p class="empty">저장된 이력이 없습니다. 대진표 화면에서 <b>내 이력에 저장</b> 버튼을 눌러 저장하세요.</p></div>';
-      return;
+  if (reset || !cloudHistState.rows.length){
+    cloudHistState.rows = [];
+    host.innerHTML = '<div class="card"><p class="empty">불러오는 중…</p></div>';
+  }
+  cloudHistState.loading = true;
+  listMySessions(30, cloudHistState.rows.length).then(function(rows){
+    cloudHistState.loading = false;
+    cloudHistState.rows = cloudHistState.rows.concat(rows);
+    var lastPage = rows.length < 30;
+    renderCloudHistList(host);
+    if (lastPage){
+      var mb = $("#cloud-more"); if (mb) mb.parentNode.removeChild(mb.parentNode);
+    } else {
+      var mb2 = $("#cloud-more");
+      if (mb2) mb2.addEventListener("click", function(){ if (!cloudHistState.loading) loadCloudHistory(false); });
     }
-    host.innerHTML = '<div class="hist">' + rows.map(function(s){
-      var snap = s.snapshot || {};
-      var pr = snap.schedule ? progressOf(snap) : {done:0, all:0};
-      var meta = (snap.count ? snap.count + "명" : "?명")
-        + (snap.schedule ? " · " + snap.schedule.length + "라운드" : "")
-        + " · " + pr.done + "/" + pr.all + "경기 입력"
-        + (s.room_code ? " · 코트 " + s.room_code : " · 솔로");
-      return '<div class="hist-item">' +
-        '<button class="hist-open" data-sid="' + s.id + '">' +
-          '<div class="hist-d">' + fmtDateFull(s.played_on) + '</div>' +
-          '<div class="hist-m">' + esc(meta) + '</div>' +
-        '</button>' +
-      '</div>';
-    }).join("") + '</div>';
-    // 세션 열기 → 로컬 DB에 복원 후 대진 화면으로
+    // 세션 열기 → 로컬 DB에 복원 후 대진 화면으로 (전체 rows에서 검색)
     Array.prototype.forEach.call(host.querySelectorAll(".hist-open"), function(b){
       b.addEventListener("click", function(){
         var sid = this.dataset.sid;
-        var s = rows.filter(function(r){ return r.id === sid; })[0];
+        var s = cloudHistState.rows.filter(function(r){ return r.id === sid; })[0];
         if (!s || !s.snapshot) return;
         startNewFromView();
         scrollMem = {};
@@ -3405,24 +3460,72 @@ function openAdminModal(){
 }
 function closeAdminModal(){ $("#mAdmin").hidden = true; }
 
+var adminUsersState = { search: "", offset: 0, limit: 50 };
+function renderAdminUsers(){
+  var wrap = $("#mAdmin-uwrap");
+  if (!wrap) return;
+  wrap.innerHTML = '<p class="empty">불러오는 중…</p>';
+  listAllUsersAdmin(adminUsersState.search, adminUsersState.limit, adminUsersState.offset).then(function(result){
+    var rows = result.rows, total = result.total;
+    if (!rows.length){
+      wrap.innerHTML = '<p class="empty">' + (adminUsersState.search ? '검색 결과 없음' : '회원이 없습니다') + '</p>';
+      return;
+    }
+    var body = rows.map(function(u){
+      return "<tr>" +
+        "<td>" + esc(u.nickname) + (u.is_admin ? ' <span class="badge b-admin">ADMIN</span>' : "") + "</td>" +
+        "<td>" + fmtDateFull(u.created_at.slice(0,10)) + "</td>" +
+        "<td>" + (u.last_seen_at ? new Date(u.last_seen_at).toLocaleString() : "-") + "</td>" +
+      "</tr>";
+    }).join("");
+    var from = adminUsersState.offset + 1;
+    var to   = adminUsersState.offset + rows.length;
+    var canPrev = adminUsersState.offset > 0;
+    var canNext = to < total;
+    wrap.innerHTML =
+      '<div class="admin-scroll" style="margin-top:10px"><table class="admin-tbl">' +
+        '<thead><tr><th>닉네임</th><th>가입일</th><th>마지막 접속</th></tr></thead>' +
+        '<tbody>' + body + '</tbody></table></div>' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;font-size:12.5px">' +
+        '<span class="mAuth-hint">' + from + '~' + to + ' / 총 ' + total + '명</span>' +
+        '<span style="display:flex;gap:6px">' +
+          '<button class="btn ghost" id="adm-u-prev" ' + (canPrev ? '' : 'disabled') + ' style="padding:5px 12px;font-size:12px">이전</button>' +
+          '<button class="btn ghost" id="adm-u-next" ' + (canNext ? '' : 'disabled') + ' style="padding:5px 12px;font-size:12px">다음</button>' +
+        '</span>' +
+      '</div>';
+    if (canPrev) $("#adm-u-prev").addEventListener("click", function(){
+      adminUsersState.offset = Math.max(0, adminUsersState.offset - adminUsersState.limit);
+      renderAdminUsers();
+    });
+    if (canNext) $("#adm-u-next").addEventListener("click", function(){
+      adminUsersState.offset += adminUsersState.limit;
+      renderAdminUsers();
+    });
+  })["catch"](function(e){ wrap.innerHTML = '<p class="mAuth-err">' + esc(e.message || e) + '</p>'; });
+}
+
 function loadAdminSection(){
   var host = $("#mAdmin-body");
   host.textContent = "불러오는 중…";
   if (adminTab === "users"){
-    listAllUsersAdmin().then(function(rows){
-      if (!rows.length){ host.innerHTML = '<p class="empty">회원이 없습니다</p>'; return; }
-      var body = rows.map(function(u){
-        return "<tr>" +
-          "<td>" + esc(u.nickname) + (u.is_admin ? ' <span class="badge b-admin">ADMIN</span>' : "") + "</td>" +
-          "<td>" + fmtDateFull(u.created_at.slice(0,10)) + "</td>" +
-          "<td>" + (u.last_seen_at ? new Date(u.last_seen_at).toLocaleString() : "-") + "</td>" +
-        "</tr>";
-      }).join("");
-      host.innerHTML = '<div class="admin-scroll"><table class="admin-tbl">' +
-        '<thead><tr><th>닉네임</th><th>가입일</th><th>마지막 접속</th></tr></thead>' +
-        '<tbody>' + body + '</tbody></table></div>' +
-        '<p class="mAuth-hint" style="margin-top:10px">총 ' + rows.length + '명</p>';
-    })["catch"](function(e){ host.innerHTML = '<p class="mAuth-err">' + esc(e.message||e) + '</p>'; });
+    // 검색 바 + 결과 영역
+    host.innerHTML =
+      '<div style="display:flex;gap:8px;margin-top:8px">' +
+        '<input id="mAdmin-usearch" placeholder="닉네임 검색" value="' + esc(adminUsersState.search) + '" ' +
+          'style="flex:1;padding:8px 12px;border:1px solid var(--hair);border-radius:8px;font:inherit;font-size:13px">' +
+      '</div>' +
+      '<div id="mAdmin-uwrap"><p class="empty">불러오는 중…</p></div>';
+    var inp = $("#mAdmin-usearch");
+    var debT;
+    inp.addEventListener("input", function(){
+      clearTimeout(debT);
+      var q = this.value.trim();
+      debT = setTimeout(function(){
+        adminUsersState.search = q; adminUsersState.offset = 0;
+        renderAdminUsers();
+      }, 250);
+    });
+    renderAdminUsers();
   } else {
     listAllRoomsAdmin().then(function(rows){
       if (!rows.length){ host.innerHTML = '<p class="empty">코트가 없습니다</p>'; return; }
