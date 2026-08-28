@@ -3259,7 +3259,7 @@ function openMyPage(){
       myPageState.rows = myPageState.rows.concat(rows);
       renderMyPageHist();
       if (rows.length < 30){
-        var mb = $("#mMe-more"); if (mb) mb.parentNode.removeChild(mb.parentNode);
+        var mb = $("#mMe-more"); if (mb && mb.parentNode) mb.parentNode.remove();
       }
     })["catch"](function(e){ $("#mMe-hist").innerHTML = '<div class="empty" style="color:#8f2f2f">' + esc(e.message || e) + '</div>'; });
   }
@@ -3426,7 +3426,7 @@ function loadCloudHistory(reset){
     var lastPage = rows.length < 30;
     renderCloudHistList(host);
     if (lastPage){
-      var mb = $("#cloud-more"); if (mb) mb.parentNode.removeChild(mb.parentNode);
+      var mb = $("#cloud-more"); if (mb && mb.parentNode) mb.parentNode.remove();
     } else {
       var mb2 = $("#cloud-more");
       if (mb2) mb2.addEventListener("click", function(){ if (!cloudHistState.loading) loadCloudHistory(false); });
