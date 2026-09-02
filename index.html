@@ -1255,6 +1255,7 @@ var S = {
   levels: [],       // 실력 등급 3(A) | 2(B) | 1(C)
   useLevel: false,  // 등급으로 팀 전력을 맞출지
   mixPartner: "random",  // 혼복 전용: "random"(매번 새 파트너) | "fixed"(고정 조)
+  samePartner: "random", // 동성복식 6인 전용: "random" | "fixed"(2인 고정페어)
   schedule: null,   // [{ matches:[{a:[i,j],b:[k,l],sa:null,sb:null}], byes:[i] }]
   sort: "diff",     // "diff" | "win"
   savedAt: null,    // 마지막 결과 저장 시각
@@ -1267,7 +1268,7 @@ function snapshot(){
            mode:S.mode, pair:S.pair, genders:S.genders.slice(),
            count:S.count, courts:S.courts, courtNames:(S.courtNames||[]).slice(),
            games:S.games, names:S.names.slice(),
-           levels:S.levels.slice(), useLevel:S.useLevel, mixPartner:S.mixPartner,
+           levels:S.levels.slice(), useLevel:S.useLevel, mixPartner:S.mixPartner, samePartner:S.samePartner,
            schedule:S.schedule, sort:S.sort, savedAt:S.savedAt };
 }
 function hydrate(s){
@@ -1282,6 +1283,7 @@ function hydrate(s){
   S.levels = (s.levels || []).slice();
   S.useLevel = !!s.useLevel;
   S.mixPartner = s.mixPartner === "fixed" ? "fixed" : "random";
+  S.samePartner = s.samePartner === "fixed" ? "fixed" : "random";
   S.sort = s.sort || "diff"; S.savedAt = s.savedAt || null;
   dirty = false;
 }
@@ -1749,12 +1751,26 @@ function pairsOf(sess){
   for (var i=0;i+1<sess.count;i+=2) ps.push([i,i+1]);
   return ps;
 }
-// 파트너 고정을 쓸 수 있는 상태인가 (혼복 전용 · 짝수 인원 · 각 조가 남1·여1)
+// 6인 동성복식에서 2인 고정페어를 쓸 수 있는지
+function sameFixedEligible(sess){
+  return sess.mode === "double" && sess.pair === "same" && sess.count === 6;
+}
+// 파트너 고정을 쓸 수 있는 상태인가
+// - 혼복: 짝수 인원 · 각 조가 남1·여1
+// - 동성복식: 6인 한정 · samePartner="fixed"
 function fixedMode(sess){
-  return sess.mode === "double" && sess.pair === "mixed" && sess.mixPartner === "fixed";
+  if (sess.mode !== "double") return false;
+  if (sess.pair === "mixed" && sess.mixPartner === "fixed") return true;
+  if (sameFixedEligible(sess) && sess.samePartner === "fixed") return true;
+  return false;
 }
 function fixedProblem(sess){
   if (sess.count % 2 !== 0) return "파트너 고정은 인원이 짝수여야 합니다. (현재 " + sess.count + "명)";
+  // 동성복식 고정페어는 성별 체크 불필요 (6인 한정만 확인)
+  if (sess.pair === "same"){
+    if (sess.count !== 6) return "2인 고정페어는 6인 동성복식에서만 지원합니다.";
+    return "";
+  }
   var ps = pairsOf(sess), gs = sess.genders || [];
   var badAt = -1;
   for (var i=0;i<ps.length;i++){
@@ -1922,7 +1938,8 @@ function encodeShare(sess){
     sess.date, sess.mode, sess.pair, sess.count, sess.courts, sess.games, sess.sort || "diff",
     sess.useLevel ? 1 : 0, sess.mixPartner === "fixed" ? "f" : "r",
     (sess.genders || []).slice(0, sess.count).map(function(g){ return g === "F" ? "F" : "M"; }).join(""),
-    (sess.levels  || []).slice(0, sess.count).map(function(v){ return (v===1||v===3) ? v : 2; }).join("")
+    (sess.levels  || []).slice(0, sess.count).map(function(v){ return (v===1||v===3) ? v : 2; }).join(""),
+    sess.samePartner === "fixed" ? "f" : "r"     // h[11]: 동성복식 6인 2인 고정페어
   ].join("~");
   var body = (sess.schedule || []).map(function(r){
     return r.matches.map(function(m){
@@ -1941,7 +1958,7 @@ function decodeShare(code){
   if (parts.length < 3) throw new Error("형식 오류");
   var h = parts[0].split("~");
   var count = +h[3];
-  if (!(count >= 2 && count <= 16)) throw new Error("인원 오류");
+  if (!(count >= 2 && count <= 24)) throw new Error("인원 오류");
   var sess = {
     date: h[0], mode: h[1] === "single" ? "single" : "double",
     pair: h[2] === "mixed" ? "mixed" : "same",
@@ -1950,6 +1967,7 @@ function decodeShare(code){
     useLevel: h[7] === "1", mixPartner: h[8] === "f" ? "fixed" : "random",
     genders: String(h[9] || "").split("").map(function(c){ return c === "F" ? "F" : "M"; }),
     levels: String(h[10] || "").split("").map(function(c){ var v = +c; return (v===1||v===3) ? v : 2; }),
+    samePartner: h[11] === "f" ? "fixed" : "random",
     names: parts[1] === "" ? [] : parts[1].split("|"),
     savedAt: null
   };
@@ -2143,7 +2161,10 @@ function foldSummary(key){
       var rst = S.count - S.courts*perCourt(S.mode);
       return "코트 " + S.courts + "면 · " + (rst ? rst + "명 휴식" : "전원 출전");
     case "games":  return "1인당 " + S.games + "경기 · 총 " + roundsFor(cfgNow()) + "라운드";
-    case "partner":return S.mixPartner === "fixed" ? "고정 조" : "랜덤";
+    case "partner":
+      var isMx = S.mode === "double" && S.pair === "mixed";
+      var pv = isMx ? S.mixPartner : S.samePartner;
+      return pv === "fixed" ? (isMx ? "고정 조" : "2인 고정페어") : "랜덤";
     case "level":
       if (!S.useLevel) return "사용 안 함";
       var c = { A:0, B:0, C:0 };
@@ -2278,33 +2299,41 @@ function renderSetup(){
     }
   }
 
-  // 파트너 (혼복 전용) — 랜덤 / 고정 조
+  // 파트너 카드 — 혼복 OR 6인 동성복식
+  var sameFixOK = sameFixedEligible(S);
   var pcard = $("#card-partner");
-  pcard.hidden = !mixed;
-  if (mixed){
+  pcard.hidden = !mixed && !sameFixOK;
+  if (mixed || sameFixOK){
     if (!$("#pt-seg").dataset.bound){
       $("#pt-seg").dataset.bound = "1";
       Array.prototype.forEach.call($("#pt-seg").children, function(b){
         b.addEventListener("click", function(){
-          S.mixPartner = this.dataset.p;
+          // 혼복이면 mixPartner, 동성복식이면 samePartner
+          if ((S.mode === "double" && S.pair === "mixed")) S.mixPartner = this.dataset.p;
+          else S.samePartner = this.dataset.p;
           courtTouched = false;   // 고정/랜덤에 따라 코트 상한이 달라진다
           renderSetup(); save();
         });
       });
     }
+    var curPartner = mixed ? S.mixPartner : S.samePartner;
     Array.prototype.forEach.call($("#pt-seg").children, function(b){
-      b.setAttribute("aria-pressed", b.dataset.p === S.mixPartner ? "true" : "false");
+      b.setAttribute("aria-pressed", b.dataset.p === curPartner ? "true" : "false");
+      // 라벨을 동성복식에서는 "2인 고정페어"로
+      if (b.dataset.p === "fixed") b.textContent = mixed ? "고정 조" : "2인 고정페어";
     });
     var ph = $("#pt-hint");
-    if (S.mixPartner !== "fixed"){
+    if (curPartner !== "fixed"){
       ph.innerHTML = "매 경기 <b>새로운 파트너</b>와 팀이 됩니다. 같은 사람과 두 번 짝이 되지 않도록 배분합니다.";
     } else if (fxBad){
       ph.innerHTML = '<span style="color:#b03b3b;font-weight:700">' + esc(fxBad) + "</span>";
     } else {
-      ph.innerHTML = "이름 순서대로 <b>2명씩 한 조</b>가 되어 대회 끝까지 같은 파트너로 뜁니다. "
-        + "조 편성을 바꾸려면 이름 순서를 바꾸세요."
+      var lead = mixed
+        ? "이름 순서대로 <b>2명씩 한 조</b>가 되어 대회 끝까지 같은 파트너로 뜁니다. "
+        : "이름 순서대로 <b>2명씩 한 페어</b> (총 3페어)가 되어 끝까지 같은 파트너로 뜁니다. 매 라운드 3페어 중 2페어가 뛰고 1페어는 쉽니다. ";
+      ph.innerHTML = lead + "조 편성을 바꾸려면 이름 순서를 바꾸세요."
         + '<span class="pairline">' + pairsOf(S).map(function(p, i){
-            return '<span class="pairchip">' + (i+1) + "조 · " + esc(nameOf(p[0])) + " · " + esc(nameOf(p[1])) + "</span>";
+            return '<span class="pairchip">' + (i+1) + "페어 · " + esc(nameOf(p[0])) + " · " + esc(nameOf(p[1])) + "</span>";
           }).join("") + "</span>";
     }
   }
