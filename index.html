@@ -383,6 +383,17 @@ window.SUPABASE_ANON_KEY = "sb_publishable_X_1Y6-P3pCaFpqdTg32www_RCxpd4DH";
     font-size:11.5px;font-weight:700;color:var(--muted);background:var(--bg);
     border:1px solid var(--hair);border-radius:7px;padding:4px 8px;
   }
+  .pair-editor{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+  .pair-row{display:flex;align-items:center;gap:8px}
+  .pair-label{
+    flex:0 0 56px;font-size:12px;font-weight:800;color:var(--muted);
+    background:var(--bg);border-radius:6px;padding:6px 8px;text-align:center;
+  }
+  .pair-row select{
+    flex:1 1 0;padding:8px 10px;border:1px solid var(--hair);border-radius:8px;
+    font:inherit;font-size:13px;color:var(--ink);background:var(--card);
+  }
+  .pair-row select:focus{outline:2px solid var(--court);outline-offset:-1px}
   .warnbox{
     background:#fdecec;border:1px solid #f3c9c9;color:#8f2f2f;
     border-radius:10px;padding:12px 14px;font-size:13px;font-weight:600;line-height:1.45;
@@ -1256,6 +1267,7 @@ var S = {
   useLevel: false,  // 등급으로 팀 전력을 맞출지
   mixPartner: "random",  // 혼복 전용: "random"(매번 새 파트너) | "fixed"(고정 조)
   samePartner: "random", // 동성복식 6인 전용: "random" | "fixed"(2인 고정페어)
+  samePairs: null,       // 동성복식 6인 고정페어의 사용자 편성 [[i,j],[k,l],[m,n]]
   schedule: null,   // [{ matches:[{a:[i,j],b:[k,l],sa:null,sb:null}], byes:[i] }]
   sort: "diff",     // "diff" | "win"
   savedAt: null,    // 마지막 결과 저장 시각
@@ -1269,6 +1281,7 @@ function snapshot(){
            count:S.count, courts:S.courts, courtNames:(S.courtNames||[]).slice(),
            games:S.games, names:S.names.slice(),
            levels:S.levels.slice(), useLevel:S.useLevel, mixPartner:S.mixPartner, samePartner:S.samePartner,
+           samePairs: S.samePairs ? S.samePairs.map(function(p){ return p.slice(); }) : null,
            schedule:S.schedule, sort:S.sort, savedAt:S.savedAt };
 }
 function hydrate(s){
@@ -1284,6 +1297,7 @@ function hydrate(s){
   S.useLevel = !!s.useLevel;
   S.mixPartner = s.mixPartner === "fixed" ? "fixed" : "random";
   S.samePartner = s.samePartner === "fixed" ? "fixed" : "random";
+  S.samePairs = (s.samePairs && s.samePairs.length === 3) ? s.samePairs.map(function(p){ return p.slice(); }) : null;
   S.sort = s.sort || "diff"; S.savedAt = s.savedAt || null;
   dirty = false;
 }
@@ -1746,7 +1760,24 @@ function courtsOf(sess){ return sess.courts || maxCourts(sess.count, sess.mode);
 
 /* ---- 고정 조(파트너 고정) ---- */
 // 이름 순서대로 2명씩 묶는다. 홀수면 마지막 1명은 빠진다
+// samePairs 유효성 (6인·중복없음·전 인덱스 사용) — invalid 면 기본으로 리셋
+function ensureSamePairs(sess){
+  if (sess.count !== 6) { sess.samePairs = null; return; }
+  var sp = sess.samePairs;
+  var ok = sp && sp.length === 3 && sp.every(function(p){ return p && p.length === 2; });
+  if (ok){
+    var seen = {};
+    sp.forEach(function(p){ p.forEach(function(i){ seen[i] = (seen[i]||0)+1; }); });
+    for (var i=0; i<6; i++){ if (seen[i] !== 1){ ok = false; break; } }
+  }
+  if (!ok) sess.samePairs = [[0,1],[2,3],[4,5]];
+}
 function pairsOf(sess){
+  // 6인 동성복식 · 고정페어 모드면 사용자 편성 반환
+  if (sess.mode === "double" && sess.pair === "same" && sess.count === 6 && sess.samePartner === "fixed"){
+    ensureSamePairs(sess);
+    return sess.samePairs.map(function(p){ return p.slice(); });
+  }
   var ps = [];
   for (var i=0;i+1<sess.count;i+=2) ps.push([i,i+1]);
   return ps;
@@ -2327,14 +2358,47 @@ function renderSetup(){
       ph.innerHTML = "매 경기 <b>새로운 파트너</b>와 팀이 됩니다. 같은 사람과 두 번 짝이 되지 않도록 배분합니다.";
     } else if (fxBad){
       ph.innerHTML = '<span style="color:#b03b3b;font-weight:700">' + esc(fxBad) + "</span>";
-    } else {
-      var lead = mixed
-        ? "이름 순서대로 <b>2명씩 한 조</b>가 되어 대회 끝까지 같은 파트너로 뜁니다. "
-        : "이름 순서대로 <b>2명씩 한 페어</b> (총 3페어)가 되어 끝까지 같은 파트너로 뜁니다. 매 라운드 3페어 중 2페어가 뛰고 1페어는 쉽니다. ";
-      ph.innerHTML = lead + "조 편성을 바꾸려면 이름 순서를 바꾸세요."
+    } else if (mixed){
+      ph.innerHTML = "이름 순서대로 <b>2명씩 한 조</b>가 되어 대회 끝까지 같은 파트너로 뜁니다. 조 편성을 바꾸려면 이름 순서를 바꾸세요."
         + '<span class="pairline">' + pairsOf(S).map(function(p, i){
-            return '<span class="pairchip">' + (i+1) + "페어 · " + esc(nameOf(p[0])) + " · " + esc(nameOf(p[1])) + "</span>";
+            return '<span class="pairchip">' + (i+1) + "조 · " + esc(nameOf(p[0])) + " · " + esc(nameOf(p[1])) + "</span>";
           }).join("") + "</span>";
+    } else {
+      // 6인 동성복식 · 사용자 편집 가능한 3페어 편성
+      ensureSamePairs(S);
+      var pairs = S.samePairs;
+      var slots = [pairs[0][0], pairs[0][1], pairs[1][0], pairs[1][1], pairs[2][0], pairs[2][1]];
+      var editorHtml = '<div class="pair-editor">';
+      for (var r=0; r<3; r++){
+        editorHtml += '<div class="pair-row"><span class="pair-label">' + (r+1) + '페어</span>';
+        for (var c=0; c<2; c++){
+          var slotIdx = r*2+c;
+          var cur = slots[slotIdx];
+          editorHtml += '<select data-pair-slot="' + slotIdx + '">';
+          for (var p=0; p<6; p++){
+            editorHtml += '<option value="' + p + '"' + (p === cur ? ' selected' : '') + '>' + esc(nameOf(p)) + '</option>';
+          }
+          editorHtml += '</select>';
+        }
+        editorHtml += '</div>';
+      }
+      editorHtml += '</div>';
+      ph.innerHTML = "매 라운드 3페어 중 2페어가 뛰고 1페어는 쉽니다. 아래에서 페어 편성을 자유롭게 바꿀 수 있습니다."
+        + editorHtml;
+      // 편집기 바인딩: 스왑 방식으로 중복 방지
+      ph.querySelectorAll("select[data-pair-slot]").forEach(function(sel){
+        sel.addEventListener("change", function(){
+          var mySlot = +this.dataset.pairSlot;
+          var newVal = +this.value;
+          var otherSlot = -1;
+          for (var i=0; i<6; i++){ if (i !== mySlot && slots[i] === newVal){ otherSlot = i; break; } }
+          var oldVal = slots[mySlot];
+          slots[mySlot] = newVal;
+          if (otherSlot >= 0) slots[otherSlot] = oldVal;
+          S.samePairs = [[slots[0], slots[1]], [slots[2], slots[3]], [slots[4], slots[5]]];
+          save(); renderSetup();
+        });
+      });
     }
   }
 
