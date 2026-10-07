@@ -1011,6 +1011,25 @@ function joinRoom(code){
   });
 }
 
+// 서버 상태를 다시 받아 놓친 변경을 반영한다
+function resyncRoom(){
+  if (!sb || !Room.code || Room.pushing || d.hidden) return;
+  var code = Room.code;
+  rpc("room_get", { p_code: code }).then(function(data){
+    if (Room.code !== code || !data) return;
+    if (Room.baseUpdatedAt && data.updated_at && data.updated_at <= Room.baseUpdatedAt) return;
+    applyRemote(data.state, data.updated_at);
+  })["catch"](function(e){
+    if (/종료된|없는 코트/.test(e.message || "")){
+      leaveRoom(); refreshAuthUI();
+      toast("코트가 종료되었습니다");
+    }
+  });
+}
+d.addEventListener("visibilitychange", function(){ if (!d.hidden) resyncRoom(); });
+window.addEventListener("online", resyncRoom);
+setInterval(resyncRoom, 20000);
+
 function resetRoom(){
   if (Room.channel){ try { Room.channel.unsubscribe(); } catch(e){} Room.channel = null; }
   Room.code = null; Room.ownerId = null; Room.presence = [];
@@ -1036,7 +1055,7 @@ function stateHash(snap){
   return h;
 }
 function pushRoomState(){
-  if (!sb || !Room.code || Room.suppressSync || !authToken()) return;
+  if (!sb || !Room.code || Room.suppressSync || !authToken() || viewOnly) return;
   if (Room.pushing){ Room.again = true; return; }
   var snap = snapshot();
   var h = stateHash(snap);
@@ -2170,9 +2189,16 @@ function decodeShare(code){
   return sess;
 }
 
+// 코트에 접속 중이면 코트 코드를 넣는다 → 받은 사람이 로그인 없이 실시간으로 본다.
+// v1 스냅샷도 함께 넣어 코트가 종료된 뒤에도 마지막 결과는 보이게 한다 (길면 코드만)
 function shareUrl(){
   var base = location.origin + location.pathname + location.search;
-  return base + "#v1=" + encodeShare(snapshot());
+  var snap = "v1=" + encodeShare(snapshot());
+  if (Room.code){
+    var live = base + "#room=" + Room.code;
+    return (live + "&" + snap).length <= 8000 ? live + "&" + snap : live;
+  }
+  return base + "#" + snap;
 }
 
 function toast(msg){
@@ -2751,7 +2777,21 @@ function renderSchedule(){
     + (S.useLevel && levelSet(S) ? " · 팀 전력 편차 평균 " + balOf(S).toFixed(1) : "");
   host.appendChild(head);
 
-  if (viewOnly){
+  if (viewOnly && Room.code){
+    // 실시간 코트 열람 (카톡 등으로 받은 #room= 링크)
+    var lv = document.createElement("div");
+    lv.className = "warnbox";
+    lv.style.margin = "10px 0 0";
+    lv.innerHTML = "<b>코트 " + esc(Room.code) + " 실시간 보기</b> · 점수가 입력되면 자동으로 바뀝니다. "
+      + (Me ? "같이 입력하려면 아래 버튼을 누르세요." : "점수 입력은 코트 참가자만 할 수 있습니다 (로그인 필요).");
+    var jb = document.createElement("button");
+    jb.className = "btn";
+    jb.style.cssText = "width:100%;margin-top:10px";
+    jb.textContent = Me ? "코트에 참가해 점수 입력하기" : "로그인하고 점수 입력하기";
+    jb.addEventListener("click", joinLiveAsEditor);
+    lv.appendChild(jb);
+    host.appendChild(lv);
+  } else if (viewOnly){
     var vo = document.createElement("div");
     vo.className = "warnbox";
     vo.style.margin = "10px 0 0";
@@ -3159,7 +3199,7 @@ function render(){
   var chip = $("#datechip");
   chip.hidden = !live;
   if (live){
-    chip.textContent = (viewOnly ? "열람용 · " : "") + fmtDate(S.date);
+    chip.textContent = (viewOnly ? (Room.code ? "실시간 · " : "열람용 · ") : "") + fmtDate(S.date);
     chip.className = "datechip" + (viewOnly ? " vo" : "");
   }
 
@@ -3348,12 +3388,13 @@ $("#share").addEventListener("click", function(){
     + modeLabel(S) + " · " + S.count + "명 · 코트 " + S.courts + "면 · "
     + S.schedule.length + "라운드 (" + pr.done + "/" + pr.all + " 경기)\n"
     + (top ? top + "\n" : "")
-    + "전체 대진·순위 보기 ↓";
+    + (Room.code ? "실시간 대진·점수 보기 ↓" : "전체 대진·순위 보기 (지금 시점 결과) ↓");
+  var okMsg = Room.code ? "실시간 링크를 복사했습니다" : "공유 링크를 복사했습니다 · 실시간으로 보려면 코트를 만들어 공유하세요";
   if (navigator.share){
     navigator.share({ title:"테니스 결과", text:txt, url:url })["catch"](function(){
-      copyText(txt + "\n" + url, "공유 링크를 복사했습니다");
+      copyText(txt + "\n" + url, okMsg);
     });
-  } else copyText(txt + "\n" + url, "공유 링크를 복사했습니다");
+  } else copyText(txt + "\n" + url, okMsg);
 });
 
 // 공유받은 결과를 내 기기 기록으로 가져온다 (대진표 안의 안내 카드에서 호출)
@@ -3363,6 +3404,7 @@ function doImport(){
     ? fmtDateFull(S.date) + " 기록이 이미 있습니다. 공유받은 결과로 덮어쓸까요?"
     : fmtDateFull(S.date) + " 결과를 내 기기에 저장할까요? 저장하면 점수를 수정할 수 있게 됩니다.";
   if (!confirm(msg)) return;
+  if (Room.code) resetRoom();   // 열람하던 코트에 내 기기 기록이 섞여 올라가지 않게
   viewOnly = false;
   S.savedAt = Date.now();
   save();
@@ -3374,13 +3416,15 @@ function doImport(){
 /* 앱이 이미 열려 있는 상태에서 공유 링크를 열면 해시만 바뀌고 새로고침되지 않는다 */
 window.addEventListener("hashchange", function(){
   var m = /[#&]v1=([A-Za-z0-9\-_]+)/.exec(location.hash || "");
-  if (!m) return;                       // 해시를 지운 경우(내 기록에 저장)는 그대로 둔다
+  var r = /[#&]room=([A-Z0-9]{6})/.exec(location.hash || "");
+  if (!m && !r) return;                 // 해시를 지운 경우(내 기록에 저장)는 그대로 둔다
   if (dirty && S.schedule) save();      // 내가 입력하던 점수는 먼저 지킨다
-  shareHash = m; shareErr = false;
+  shareHash = m; shareErr = false; roomHash = r;
   openShared();
   scrollMem = {};
   render();
   window.scrollTo({top:0});
+  openLiveShared();
 });
 
 /* 페이지를 벗어날 때 미저장 점수 자동 백업 */
@@ -3396,7 +3440,39 @@ function startNewFromView(){
 /* ---------------- boot ---------------- */
 // 공유 링크(#v1=...)로 들어왔으면 그 결과를 읽기 전용으로 먼저 보여준다
 var shareHash = /[#&]v1=([A-Za-z0-9\-_]+)/.exec((typeof location !== "undefined" && location.hash) || "");
+var roomHash  = /[#&]room=([A-Z0-9]{6})/.exec((typeof location !== "undefined" && location.hash) || "");
 var shareErr = false;
+
+// 실시간 코트 링크(#room=CODE)로 들어왔으면 로그인 없이 읽기 전용으로 접속한다.
+// v1 스냅샷이 같이 있으면 그걸 먼저 보여주고(즉시 표시), 서버 상태가 오면 바꾼다.
+function openLiveShared(){
+  if (!roomHash || !sb) return;
+  var code = roomHash[1];
+  viewOnly = true;
+  S.tab = "sched";
+  joinRoom(code).then(function(){
+    viewOnly = true;      // joinRoom 의 hydrate 가 바꾸지 않지만 명시
+    render();
+  })["catch"](function(e){
+    resetRoom();
+    if (S.schedule){
+      toast("코트가 종료되어 공유 시점의 결과를 보여줍니다");
+    } else {
+      shareErr = true; viewOnly = false; S.mode = null;
+      toast(e.message || "코트를 열 수 없습니다");
+    }
+    render();
+  });
+}
+
+// 실시간 열람자 → 편집 참가 (로그인 필요)
+function joinLiveAsEditor(){
+  if (!Me){ toast("먼저 로그인이 필요합니다"); openAuthModal(); return; }
+  viewOnly = false;
+  if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+  render(); refreshAuthUI();
+  toast("코트 " + Room.code + " 참가 · 점수를 입력할 수 있습니다");
+}
 
 function openShared(){
   if (!shareHash) return false;
@@ -3417,12 +3493,12 @@ Store.get().then(function(saved){
   if (saved && saved.sessions){
     DB = { sessions: saved.sessions || {}, current: saved.current || null };
     // 공유 링크로 들어왔으면 내 마지막 세션을 띄우지 않는다
-    if (!shareHash && DB.current && DB.sessions[DB.current]) hydrate(DB.sessions[DB.current]);
+    if (!shareHash && !roomHash && DB.current && DB.sessions[DB.current]) hydrate(DB.sessions[DB.current]);
   } else if (saved && saved.count){
     // 구버전(단일 세션) 데이터 → 오늘 날짜 기록으로 이관
     var d = saved.date || todayStr();
     saved.date = d;
-    if (saved.schedule){ DB.sessions[d] = saved; DB.current = d; if (!shareHash) hydrate(saved); }
+    if (saved.schedule){ DB.sessions[d] = saved; DB.current = d; if (!shareHash && !roomHash) hydrate(saved); }
     else { S.count = saved.count; S.games = saved.games || saved.rounds || 4; S.names = saved.names || []; }
     Store.set(DB);
   }
@@ -3432,6 +3508,7 @@ Store.get().then(function(saved){
   bindAuthUI();
   refreshAuthUI();
   refreshMeFromServer().then(refreshAuthUI);
+  openLiveShared();
   // localStorage 사용 불가(시크릿 모드 등)이면 사용자에게 안내
   if (Store.kind() === "memory") setTimeout(function(){
     toast("저장이 안 됩니다. 시크릿 모드거나 저장 공간이 막혀 있어요.");

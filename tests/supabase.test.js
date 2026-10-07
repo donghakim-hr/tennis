@@ -339,6 +339,99 @@ async function main(){
     t("런타임 오류 없음", () => assert(!errs.length, errs[0]));
   }
 
+  console.log("\n=== 카톡 공유 링크: 실시간 열람 (#room=CODE) ===");
+  {
+    const { click, fire, pickMode, fillNames } = require("./lib");
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    // 1) 방주 쪽: 코트 안에서 공유하면 링크에 코트 코드가 들어간다
+    const rpcA = [], mockA = makeMockSupabase();
+    let created = null;
+    mockA.rpc = function(fn, args){
+      rpcA.push({ fn, args });
+      let data = { ok:true };
+      if (fn === "verify_pin") data = { id:"u1", nickname:"방주", is_admin:false, token:"t".repeat(64) };
+      if (fn === "room_create"){ created = JSON.parse(JSON.stringify(args.p_state)); data = { code:"KAKAO2" }; }
+      if (fn === "room_get") data = { code:"KAKAO2", owner_id:"u1", state:created, updated_at:"2026-10-07T00:00:00Z" };
+      return Promise.resolve({ data, error:null });
+    };
+    const domA = new JSDOM(HTML, { runScripts:"dangerously", pretendToBeVisual:true, url:"https://example.com/tennis/",
+      beforeParse: function(w){
+        w.SUPABASE_URL = "https://mock.supabase.co"; w.SUPABASE_ANON_KEY = "sb_publishable_test";
+        w.supabase = { createClient: function(){ return mockA; } };
+        w.confirm = () => true; w.prompt = () => "";
+      } });
+    const wA = domA.window, dA = wA.document;
+    const A = { w:wA, d:dA, $: q => dA.querySelector(q), $$: (q, r) => [...(r || dA).querySelectorAll(q)] };
+    await sleep(150);
+    click(wA, A.$("#btn-auth")); A.$("#mAuth-nick").value = "방주"; A.$("#mAuth-pin").value = "1234";
+    click(wA, A.$("#mAuth-submit")); await sleep(30);
+    pickMode(A, "same"); fillNames(A, "p"); click(wA, A.$("#make"));
+    click(wA, A.$("#btn-room")); click(wA, A.$("#mRoom-create")); await sleep(50);
+    let copied = null;
+    Object.defineProperty(wA.navigator, "share", { value: undefined, configurable: true });
+    Object.defineProperty(wA.navigator, "clipboard", { value: { writeText: t => { copied = t; return Promise.resolve(); } }, configurable: true });
+    click(wA, A.$("#share")); await sleep(30);
+    const url = String(copied).split("\n").pop();
+    t("코트 안에서 공유하면 #room=코드 + 스냅샷 링크", () => {
+      assert(/#room=KAKAO2&v1=/.test(url), url.slice(0, 80));
+      assert(/실시간/.test(copied), "문구에 실시간");
+    });
+
+    // 2) 받은 사람(로그인 안 함)이 카톡에서 링크를 연다
+    const rpcB = [], handlers = [];
+    let serverState = JSON.parse(JSON.stringify(created)), serverAt = "2026-10-07T00:00:00Z";
+    const mockB = makeMockSupabase();
+    mockB.rpc = function(fn, args){
+      rpcB.push({ fn, args });
+      if (fn === "room_get") return Promise.resolve({ data:{ code:"KAKAO2", owner_id:"u1", state:JSON.parse(JSON.stringify(serverState)), updated_at:serverAt }, error:null });
+      return Promise.resolve({ data:{ ok:true }, error:null });
+    };
+    const ch = { on: function(k, f, fn){ handlers.push({ k, fn }); return ch; }, subscribe: function(cb){ cb && cb("SUBSCRIBED"); return ch; },
+                 unsubscribe: function(){ return Promise.resolve(); }, track: function(){ return Promise.resolve(); }, presenceState: function(){ return {}; } };
+    mockB.channel = function(){ return ch; };
+    const domB = new JSDOM(HTML, { runScripts:"dangerously", pretendToBeVisual:true, url,
+      beforeParse: function(w){
+        w.SUPABASE_URL = "https://mock.supabase.co"; w.SUPABASE_ANON_KEY = "sb_publishable_test";
+        w.supabase = { createClient: function(){ return mockB; } };
+      } });
+    const wB = domB.window, dB = wB.document, errs = [];
+    wB.addEventListener("error", e => errs.push(String(e.error && e.error.stack || e.message)));
+    const $B = q => dB.querySelector(q), $$B = (q, r) => [...(r || dB).querySelectorAll(q)];
+    await sleep(200);
+    t("로그인 없이 코트에 접속해 대진이 보인다 (room_get)", () => {
+      assert(rpcB.some(x => x.fn === "room_get" && x.args.p_code === "KAKAO2"), "room_get");
+      assert(!$B("#sched").hidden && $$B("#sched .court").length > 0, "대진 표시");
+      assert(/실시간/.test($B("#datechip").textContent), "칩: " + $B("#datechip").textContent);
+      assert(/코트 KAKAO2 실시간 보기/.test($B("#sched").textContent), "안내 카드");
+      assert($$B("#sched .score").every(x => x.hasAttribute("readonly")), "읽기 전용");
+    });
+    serverState.schedule[0].matches[0].sa = 6; serverState.schedule[0].matches[0].sb = 3;
+    serverAt = "2026-10-07T00:00:05Z";
+    handlers.find(h => h.k === "postgres_changes").fn({ new:{ state:serverState, updated_at:serverAt, last_writer:"cA", is_open:true } });
+    t("방주가 점수를 넣으면 열람 화면이 바로 바뀐다 (Realtime)", () => {
+      const s0 = $$B("#sched .score");
+      assert(s0[0].value === "6" && s0[1].value === "3", s0[0].value + ":" + s0[1].value);
+    });
+    // 카톡 인앱 브라우저가 백그라운드에서 소켓을 놓친 경우 → 화면 복귀 시 다시 받는다
+    serverState.schedule[0].matches[1].sa = 2; serverState.schedule[0].matches[1].sb = 6;
+    serverAt = "2026-10-07T00:00:09Z";
+    const nGet = rpcB.filter(x => x.fn === "room_get").length;
+    dB.dispatchEvent(new wB.Event("visibilitychange"));
+    await sleep(30);
+    t("화면으로 돌아오면 서버 상태를 다시 받아 놓친 점수를 채운다", () => {
+      assert(rpcB.filter(x => x.fn === "room_get").length === nGet + 1, "resync room_get");
+      const s0 = $$B("#sched .score");
+      assert(s0[2].value === "2" && s0[3].value === "6", s0[2].value + ":" + s0[3].value);
+    });
+    t("열람자는 서버에 쓰지 않는다", () => assert(!rpcB.some(x => x.fn === "room_push_state"), "push 발생"));
+    handlers.find(h => h.k === "postgres_changes").fn({ new:{ state:serverState, updated_at:"2026-10-07T00:00:20Z", last_writer:"cA", is_open:false } });
+    t("코트가 종료되면 마지막 결과를 남긴 채 열람 모드로", () => {
+      assert($$B("#sched .score")[0].value === "6", "결과 유지");
+      assert(/공유받은 결과/.test($B("#sched").textContent), "정적 열람 안내");
+    });
+    t("런타임 오류 없음", () => assert(!errs.length, errs[0]));
+  }
+
   console.log(`\nSupabase 스모크: ${pass} 통과 / ${fail} 실패`);
   process.exit(fail ? 1 : 0);
 }
