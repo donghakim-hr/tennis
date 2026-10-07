@@ -774,9 +774,7 @@ var CONST = {
     AUTH:     "tennis:auth"        // 로그인 상태 (닉네임·id만)
   },
   ROOM: {
-    CODE_LEN:   6,
-    CODE_CHARS: "ABCDEFGHJKLMNPQRSTUVWXYZ23456789",   // 0/O/1/I 제외
-    ECHO_MS:    500,                                    // 자기 push 에코 무시 임계
+    CODE_LEN:   6,                                      // 코드는 서버(room_create)가 뽑는다
     MAX_STREAK: 3                                       // 하드 연속 출전 상한
   },
   AUTH: {
@@ -865,8 +863,7 @@ function mapAuthErr(err){
 // 토큰 만료를 한 곳에서 처리한다 (여러 화면이 제각각 처리하면 상태가 어긋난다)
 function onAuthLost(){
   setMe(null);
-  if (Room.channel){ try { Room.channel.unsubscribe(); } catch(e){} Room.channel = null; }
-  Room.code = null;
+  resetRoom();
   if (typeof refreshAuthUI === "function") refreshAuthUI();
 }
 function rpc(fn, args){
@@ -905,9 +902,7 @@ function signIn(nickname, pin){
 
 function signOut(){
   var tok = authToken();
-  if (Room.channel){ try { Room.channel.unsubscribe(); } catch(e){} Room.channel = null; }
-  Room.code = null; Room.presence = []; Room.baseUpdatedAt = null; Room.pending = {};
-  _lastPushedState = null;
+  resetRoom();
   setMe(null);
   // 서버 세션도 정리한다 (실패해도 로컬은 이미 로그아웃 상태)
   if (sb && tok) sb.rpc("sign_out", { p_token: tok })["catch"](function(){});
@@ -921,19 +916,21 @@ function changePin(curPin, newPin){
 }
 
 /* ---------------- 방 시스템 ---------------- */
+// 방 쓰기는 전부 서버 RPC 경유다 (room_create / room_push_state / room_get / room_close).
+// rooms 테이블은 SELECT 만 열려 있다 — 목록 조회와 Realtime 수신용.
 var Room = {
   code: null,           // 현재 접속 중인 방 코드
+  ownerId: null,        // 방 주인 id (코트 종료 버튼 노출용)
   channel: null,        // Realtime 채널
   suppressSync: false,  // 원격 변경 반영 중일 때 로컬 save() 재전송 방지
-  lastPushAt: 0,        // 최근 push 시각 (에코 무시용)
+  baseUpdatedAt: null,  // 마지막으로 서버와 맞춘 updated_at (낙관적 락 기준)
+  baseSnap: null,       // 그 시점의 상태 사본 (충돌 시 '내가 바꾼 것'을 가려내는 기준)
+  pushing: false,       // push 진행 중 (겹쳐 보내지 않는다)
+  again: false,         // 진행 중에 또 바뀌었으면 끝나고 한 번 더
   presence: []          // 현재 코트에 접속 중인 사용자 [{id, nickname}]
 };
 
-function randRoomCode(){
-  var s = "", chars = CONST.ROOM.CODE_CHARS;
-  for (var i=0;i<CONST.ROOM.CODE_LEN;i++) s += chars[Math.floor(Math.random()*chars.length)];
-  return s;
-}
+function cloneState(s){ return s ? JSON.parse(JSON.stringify(s)) : null; }
 
 // 열려있는 방 목록 (최근 업데이트 순)
 function listOpenRooms(limit){
@@ -943,63 +940,85 @@ function listOpenRooms(limit){
     .then(function(res){ return res.data || []; });
 }
 
-// 방 만들기 — 현재 S 스냅샷을 초기 state로 저장
+// 방 만들기 — 코드는 서버가 뽑는다. 현재 S 스냅샷을 초기 state로 저장
 function createRoom(title){
-  if (!sb) return Promise.reject(new Error("Supabase 설정이 없습니다"));
-  if (!Me) return Promise.reject(new Error("로그인이 필요합니다"));
-  var code = randRoomCode();
-  return sb.from("rooms").insert({
-    code: code, owner_id: Me.id, title: title || "",
-    state: snapshot(), is_open: true
-  }).select().single().then(function(res){
-    if (res.error) throw new Error(res.error.message);
-    return joinRoom(code).then(function(){ return code; });
-  });
+  if (!authToken()) return Promise.reject(new Error("로그인이 필요합니다"));
+  return rpc("room_create", { p_token: authToken(), p_title: title || "", p_state: snapshot() })
+    .then(function(data){
+      if (!data || !data.code) throw new Error("코트를 만들지 못했습니다");
+      return joinRoom(data.code).then(function(){ return data.code; });
+    });
+}
+
+// 서버 상태를 로컬 기준점으로 삼는다
+function setRoomBase(state, updatedAt){
+  Room.baseSnap = cloneState(state);
+  if (updatedAt) Room.baseUpdatedAt = updatedAt;
+}
+
+// 원격 상태를 화면에 반영 (그 사이 내가 바꾼 점수는 살린다)
+function applyRemote(remote, updatedAt){
+  var merged = mergeRoomState(Room.baseSnap, snapshot(), remote);
+  setRoomBase(remote, updatedAt);
+  Room.suppressSync = true;
+  try { hydrate(merged.state); render(); } finally { Room.suppressSync = false; }
+  if (merged.lost) toast("다른 기기에서 대진이 바뀌어 최신 대진으로 맞췄습니다");
+  // 내 변경이 살아남았으면 서버에도 보낸다
+  if (merged.mine) pushRoomState();
 }
 
 // 방 접속 — 상태 로드 + Realtime 구독
 function joinRoom(code){
   if (!sb) return Promise.reject(new Error("Supabase 설정이 없습니다"));
-  return sb.from("rooms").select("state,title,owner_id").eq("code", code).maybeSingle()
-    .then(function(res){
-      if (res.error) throw new Error(res.error.message);
-      if (!res.data)  throw new Error("없는 코트입니다");
-      // 원격 상태를 로컬에 반영
-      Room.suppressSync = true;
-      try { hydrate(res.data.state); } finally { Room.suppressSync = false; }
-      Room.code = code;
-      // Realtime 구독 + presence
-      if (Room.channel){ try { Room.channel.unsubscribe(); } catch(e){} }
-      Room.channel = sb.channel("room:" + code, { config: { presence: { key: (Me && Me.id) || ("g:" + Math.random().toString(36).slice(2)) } } })
-        .on("postgres_changes",
-            { event: "UPDATE", schema: "public", table: "rooms", filter: "code=eq." + code },
-            function(payload){
-              if (Date.now() - Room.lastPushAt < CONST.ROOM.ECHO_MS) return;
-              Room.suppressSync = true;
-              try { hydrate(payload.new.state); render(); } finally { Room.suppressSync = false; }
-            })
-        .on("presence", { event: "sync" }, function(){
-          var state = Room.channel.presenceState() || {};
-          var seen = {}, arr = [];
-          Object.keys(state).forEach(function(k){
-            (state[k] || []).forEach(function(u){
-              if (u && u.id && !seen[u.id]){ seen[u.id]=1; arr.push({ id:u.id, nickname:u.nickname }); }
-            });
+  return rpc("room_get", { p_code: code }).then(function(data){
+    if (!data) throw new Error("없는 코트입니다");
+    Room.suppressSync = true;
+    try { hydrate(data.state); } finally { Room.suppressSync = false; }
+    Room.code = code;
+    Room.ownerId = data.owner_id || null;
+    setRoomBase(data.state, data.updated_at);
+    // Realtime 구독 + presence
+    if (Room.channel){ try { Room.channel.unsubscribe(); } catch(e){} }
+    // 콜백은 채널을 지역 변수로 잡는다 (subscribe 콜백이 Room.channel 대입보다 먼저 올 수 있다)
+    var chan = sb.channel("room:" + code, { config: { presence: { key: (Me && Me.id) || ("g:" + Math.random().toString(36).slice(2)) } } });
+    Room.channel = chan;
+    chan
+      .on("postgres_changes",
+          { event: "UPDATE", schema: "public", table: "rooms", filter: "code=eq." + code },
+          function(payload){
+            var row = payload.new || {};
+            if (row.last_writer === CLIENT_ID) return;   // 내가 쓴 것의 에코
+            if (row.is_open === false){ leaveRoom(); toast("코트가 종료되었습니다"); refreshAuthUI(); return; }
+            if (Room.baseUpdatedAt && row.updated_at && row.updated_at <= Room.baseUpdatedAt) return;   // 이미 반영한 것
+            applyRemote(row.state, row.updated_at);
+          })
+      .on("presence", { event: "sync" }, function(){
+        var state = chan.presenceState() || {};
+        var seen = {}, arr = [];
+        Object.keys(state).forEach(function(k){
+          (state[k] || []).forEach(function(u){
+            if (u && u.id && !seen[u.id]){ seen[u.id]=1; arr.push({ id:u.id, nickname:u.nickname }); }
           });
-          Room.presence = arr;
-        })
-        .subscribe(function(status){
-          if (status === "SUBSCRIBED" && Me){
-            Room.channel.track({ id: Me.id, nickname: Me.nickname });
-          }
         });
-      render();
-    });
+        Room.presence = arr;
+      })
+      .subscribe(function(status){
+        if (status === "SUBSCRIBED" && Me){
+          chan.track({ id: Me.id, nickname: Me.nickname });
+        }
+      });
+    render();
+  });
 }
 
-function leaveRoom(){
+function resetRoom(){
   if (Room.channel){ try { Room.channel.unsubscribe(); } catch(e){} Room.channel = null; }
-  Room.code = null;
+  Room.code = null; Room.ownerId = null; Room.presence = [];
+  Room.baseUpdatedAt = null; Room.baseSnap = null; Room.again = false;
+  _lastPushedHash = null;
+}
+function leaveRoom(){
+  resetRoom();
   render();
 }
 
@@ -1010,82 +1029,137 @@ function stateHash(snap){
   // 대진표+점수+이름 위주로 가벼운 시그니처 (JSON stringify 대신 필드 순회)
   var h = "";
   if (snap.schedule) snap.schedule.forEach(function(rd){
-    rd.matches.forEach(function(m){ h += (m.sa || "") + "," + (m.sb || "") + "|"; });
+    h += "R:" + rd.matches.map(function(m){ return m.a.concat(m.b).join("."); }).join("/") + "|";
+    rd.matches.forEach(function(m){ h += (m.sa == null ? "" : m.sa) + "," + (m.sb == null ? "" : m.sb) + "|"; });
   });
   h += "N:" + (snap.names || []).join(",") + "|C:" + (snap.count || 0) + "|CT:" + (snap.courtNames || []).join(",");
   return h;
 }
 function pushRoomState(){
-  if (!sb || !Room.code || Room.suppressSync) return;
+  if (!sb || !Room.code || Room.suppressSync || !authToken()) return;
+  if (Room.pushing){ Room.again = true; return; }
   var snap = snapshot();
   var h = stateHash(snap);
   if (h === _lastPushedHash) return;    // 실질 변화 없음
-  _lastPushedHash = h;
-  Room.lastPushAt = Date.now();
-  sb.from("rooms").update({ state: snap }).eq("code", Room.code).then(function(){});
+  var code = Room.code;
+  Room.pushing = true;
+  rpc("room_push_state", {
+    p_token: authToken(), p_code: code, p_state: snap,
+    p_client_id: CLIENT_ID, p_base_updated_at: Room.baseUpdatedAt
+  }).then(function(data){
+    if (Room.code !== code) return;
+    if (data && data.ok){
+      _lastPushedHash = h;
+      setRoomBase(snap, data.updated_at);
+    } else if (data && data.conflict){
+      // 내가 읽은 뒤 다른 기기가 먼저 썼다 → 합쳐서 다시 보낸다 (applyRemote 가 재전송)
+      applyRemote(data.state, data.updated_at);
+    }
+  })["catch"](function(e){
+    if (/ROOM_CLOSED|ROOM_NOT_FOUND/.test(e.message) || /종료된|없는 코트/.test(e.message)){
+      leaveRoom(); refreshAuthUI();
+    }
+    toast("코트 동기화 실패: " + e.message);
+  }).then(function(){
+    Room.pushing = false;
+    if (Room.again){ Room.again = false; pushRoomState(); }
+  });
+}
+
+// 충돌 병합: base(마지막으로 맞춘 상태) 기준으로 mine(내 화면)과 theirs(서버)를 합친다.
+// - 대진 구성(누가 어느 라운드에서 누구와)은 한쪽만 바꿨으면 그쪽을 따른다. 둘 다 바꿨으면 서버를 따른다
+// - 점수는 칸 단위로: 내가 base 에서 바꾼 칸은 내 값, 나머지는 서버 값
+// 반환: { state, mine: 내 변경이 남았는지, lost: 내 대진 변경을 버렸는지 }
+function mergeRoomState(base, mine, theirs){
+  mine = cloneState(mine); theirs = cloneState(theirs);
+  if (!base || !theirs) return { state: theirs || mine, mine: false, lost: false };
+  function shape(s){
+    return (s.schedule || []).map(function(rd){
+      return rd.matches.map(function(m){ return m.a.join(".") + "v" + m.b.join("."); }).join("/");
+    }).join("|");
+  }
+  // 경기 식별: 대진 구성 문자열 + 같은 구성이 몇 번째인지 (라운드 순서가 바뀌어도 같은 경기를 찾는다)
+  function scoreMap(s){
+    var map = {}, seen = {};
+    (s.schedule || []).forEach(function(rd){
+      rd.matches.forEach(function(m){
+        var k = m.a.join(".") + "v" + m.b.join(".");
+        seen[k] = (seen[k] || 0) + 1;
+        map[k + "#" + seen[k]] = m;
+      });
+    });
+    return map;
+  }
+  var bS = shape(base), mS = shape(mine), tS = shape(theirs);
+  var lost = false, out, other;
+  if (mS !== bS && tS === bS){ out = mine;   other = theirs; }   // 대진은 내 쪽만 바뀜
+  else {                       out = theirs; other = mine;   if (mS !== bS) lost = true; }
+  var bm = scoreMap(base), om = scoreMap(out), xm = scoreMap(other);
+  var mineWon = (out === mine);
+  // 반대쪽이 base 에서 바꾼 점수 칸을 out 에 얹는다
+  Object.keys(xm).forEach(function(k){
+    var x = xm[k], b = bm[k], o = om[k];
+    if (!o) return;
+    ["sa","sb"].forEach(function(f){
+      var bv = b ? b[f] : null;
+      if (x[f] !== bv && x[f] !== o[f]){
+        // 반대쪽이 바꾼 칸. out 쪽도 base 에서 바꿨다면 둘 다 고친 칸 → 서버(theirs)가 이긴다
+        var oChanged = o[f] !== bv;
+        if (!oChanged || other === theirs){ o[f] = x[f]; }
+        if (other === mine && !oChanged) mineWon = true;
+      }
+    });
+  });
+  // 이름·코트 이름 등 대진 밖 필드: 내가 base 에서 바꿨으면 내 값
+  ["names","courtNames","levels","genders"].forEach(function(f){
+    if (JSON.stringify(mine[f]) !== JSON.stringify(base[f])){
+      if (JSON.stringify(mine[f]) !== JSON.stringify(theirs[f])) mineWon = true;
+      out[f] = mine[f];
+    } else if (out === mine){
+      out[f] = theirs[f];
+    }
+  });
+  return { state: out, mine: mineWon, lost: lost };
 }
 
 // 방 닫기 (owner만) — 목록에서 사라지지만 sessions/user_sessions 이력은 보존
 function closeRoom(){
-  if (!sb || !Room.code || !Me) return Promise.reject(new Error("로그인·코트 필요"));
-  var code = Room.code;
-  return sb.from("rooms").update({ is_open: false }).eq("code", code).eq("owner_id", Me.id)
-    .select().then(function(res){
-      if (res.error) throw new Error(res.error.message);
-      if (!res.data || !res.data.length) throw new Error("코트 주인만 종료할 수 있습니다");
-      leaveRoom();
-    });
+  if (!Room.code || !authToken()) return Promise.reject(new Error("로그인·코트 필요"));
+  return rpc("room_close", { p_token: authToken(), p_code: Room.code }).then(function(){ leaveRoom(); });
 }
 
 /* ---------------- 관리자 전용 ---------------- */
+// 권한은 서버가 토큰으로 검사한다. 클라이언트의 is_admin 은 버튼 노출용일 뿐이다.
 // 관리자용 회원 목록 - 페이지네이션 + 닉네임 검색
 // { rows: [...], total: N }
 function listAllUsersAdmin(search, limit, offset){
   if (!sb) return Promise.resolve({ rows: [], total: 0 });
-  var params = { p_search: search || null, p_limit: limit || 50, p_offset: offset || 0 };
-  return sb.rpc("admin_list_users", params).then(function(res){
-    if (res.error) throw res.error;
-    var rows = res.data || [];
-    var total = rows.length ? Number(rows[0].total_count) : 0;
-    return { rows: rows, total: total };
-  })["catch"](function(){
-    // RPC 없으면 (구 마이그레이션 상태) view 사용해 폴백
-    return sb.from("app_users_public").select("id,nickname,is_admin,created_at,last_seen_at", { count: "exact" })
-      .ilike("nickname", search ? "%" + search + "%" : "%")
-      .order("created_at", { ascending: false })
-      .range(offset || 0, (offset || 0) + (limit || 50) - 1)
-      .then(function(r2){ return { rows: r2.data || [], total: r2.count || 0 }; })
-      ["catch"](function(){
-        return sb.from("app_users").select("id,nickname,is_admin,created_at,last_seen_at", { count: "exact" })
-          .ilike("nickname", search ? "%" + search + "%" : "%")
-          .order("created_at", { ascending: false })
-          .range(offset || 0, (offset || 0) + (limit || 50) - 1)
-          .then(function(r3){ return { rows: r3.data || [], total: r3.count || 0 }; });
-      });
+  return rpc("admin_list_users", {
+    p_token: authToken(), p_search: search || null, p_limit: limit || 50, p_offset: offset || 0
+  }).then(function(rows){
+    rows = rows || [];
+    return { rows: rows, total: rows.length ? Number(rows[0].total_count) : 0 };
   });
 }
 
+// 관리자 코트 목록 — 코트주 닉네임(owner_nickname)까지 서버가 붙여준다
 function listAllRoomsAdmin(){
   if (!sb) return Promise.resolve([]);
-  return sb.from("rooms").select("code,title,owner_id,is_open,created_at,updated_at")
-    .order("created_at", {ascending:false}).limit(200)
-    .then(function(res){ return res.data || []; });
+  return rpc("admin_list_rooms", { p_token: authToken() }).then(function(rows){ return rows || []; });
 }
 
 // 관리자 강제 종료 (owner 상관 없이 is_open=false)
 function adminCloseRoom(code){
-  if (!sb || !Me || !Me.is_admin) return Promise.reject(new Error("관리자만 가능"));
-  return sb.from("rooms").update({ is_open: false }).eq("code", code).select().then(function(res){
-    if (res.error) throw new Error(res.error.message);
+  if (!Me || !Me.is_admin) return Promise.reject(new Error("관리자만 가능"));
+  return rpc("admin_close_room", { p_token: authToken(), p_code: code }).then(function(){
     if (Room.code === code) leaveRoom();
   });
 }
 
 // 관리자 강제 삭제 (방·연결된 세션은 room_code FK가 SET NULL이라 이력은 보존)
 function adminDeleteRoom(code){
-  if (!sb || !Me || !Me.is_admin) return Promise.reject(new Error("관리자만 가능"));
-  return sb.from("rooms").delete().eq("code", code).then(function(res){
-    if (res.error) throw new Error(res.error.message);
+  if (!Me || !Me.is_admin) return Promise.reject(new Error("관리자만 가능"));
+  return rpc("admin_delete_room", { p_token: authToken(), p_code: code }).then(function(){
     if (Room.code === code) leaveRoom();
   });
 }
@@ -1298,7 +1372,17 @@ function hydrate(s){
   S.samePartner = s.samePartner === "fixed" ? "fixed" : "random";
   S.samePairs = (s.samePairs && s.samePairs.length === 3) ? s.samePairs.map(function(p){ return p.slice(); }) : null;
   S.sort = s.sort || "diff"; S.savedAt = s.savedAt || null;
+  fillByes(S.schedule, S.count);   // 예전 혼복 하이브리드 대진은 휴식 명단에 소수 성별이 빠져 있었다
   dirty = false;
+}
+// 휴식 = 그 라운드에 안 뛴 사람 전원 (대진에서 다시 계산)
+function fillByes(sched, n){
+  (sched || []).forEach(function(rd){
+    var inP = {};
+    rd.matches.forEach(function(m){ m.a.concat(m.b).forEach(function(x){ inP[x] = true; }); });
+    rd.byes = [];
+    for (var j=0; j<n; j++) if (!inP[j]) rd.byes.push(j);
+  });
 }
 function save(){
   if (viewOnly) return;   // 공유 링크로 본 결과는 기기에 남기지 않는다
@@ -1712,6 +1796,8 @@ function buildHybridSchedule(cfg, hp, cap){
       type: "same", genders: cfg.genders, anchor: false, cap: cap,
       seed: phase1.state, eligiblePool: majorityIdx
     });
+    // 동복 라운드는 다수 성별만 놓고 짜서 소수 성별이 휴식 명단에서 빠진다 → 안 뛴 사람 전원으로 채운다
+    fillByes(phase2.rounds, cfg.n);
     var mix = interleaveRounds(phase1.rounds, phase2.rounds, cfg.n);
     var vio = 0;
     streaksOf(mix.rounds, cfg.n).forEach(function(m){ if (m >= 4) vio++; });
@@ -3495,8 +3581,8 @@ function openRoomModal(){
     $("#mRoom-leave").addEventListener("click", function(){ leaveRoom(); openRoomModal(); toast("코트에서 나갔습니다"); });
     // 코트 종료 버튼: owner만 노출
     if (sb && Me){
-      sb.from("rooms").select("owner_id").eq("code", Room.code).maybeSingle().then(function(res){
-        if (res.data && res.data.owner_id === Me.id){
+      (function(){
+        if (Room.ownerId && Room.ownerId === Me.id){
           var btn = $("#mRoom-close");
           if (btn){
             btn.hidden = false;
@@ -3507,7 +3593,7 @@ function openRoomModal(){
             });
           }
         }
-      });
+      })();
     }
   } else { cur.hidden = true; }
   $("#mRoom").hidden = false;
@@ -3702,17 +3788,9 @@ function loadAdminSection(){
   } else {
     listAllRoomsAdmin().then(function(rows){
       if (!rows.length){ host.innerHTML = '<p class="empty">코트가 없습니다</p>'; return; }
-      // owner_id → nickname 매핑 (한 번에 조회)
-      var ownerIds = rows.map(function(r){return r.owner_id;}).filter(Boolean);
-      var uniq = ownerIds.filter(function(v,i,a){return a.indexOf(v)===i;});
-      var ownerP = uniq.length
-        ? sb.from("app_users").select("id,nickname").in("id", uniq).then(function(res){
-            var map = {}; (res.data||[]).forEach(function(u){ map[u.id] = u.nickname; }); return map;
-          })
-        : Promise.resolve({});
-      ownerP.then(function(nickMap){
+      (function(){
         var body = rows.map(function(r){
-          var owner = r.owner_id ? (nickMap[r.owner_id] || "?") : "(없음)";
+          var owner = r.owner_id ? (r.owner_nickname || "?") : "(없음)";
           var badge = r.is_open
             ? '<span class="badge b-open">진행중</span>'
             : '<span class="badge b-closed">종료</span>';
@@ -3751,7 +3829,7 @@ function loadAdminSection(){
               ["catch"](function(e){ alert("실패: " + e.message); });
           });
         });
-      });
+      })();
     })["catch"](function(e){ host.innerHTML = '<p class="mAuth-err">' + esc(e.message||e) + '</p>'; });
   }
 }

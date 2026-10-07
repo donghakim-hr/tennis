@@ -154,6 +154,191 @@ async function main(){
     assert(c.orderInfo && c.orderInfo.k === "updated_at", "updated_at desc 정렬");
   });
 
+  // ---------------------------------------------------------------------------
+  // 실제 화면 조작으로 RPC 경로 검증: 로그인 → 코트 만들기 → 점수 동기화 → 충돌 병합 → 종료 → 로그아웃
+  // rooms 직접 쓰기는 서버에서 막혀 있으므로 insert/update/delete 가 한 번도 나가면 안 된다.
+  // ---------------------------------------------------------------------------
+  console.log("\n=== RPC 경로: 코트 만들기 · 동기화 · 충돌 병합 · 종료 ===");
+  {
+    const { click, fire, pickMode, fillNames } = require("./lib");
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const rpcCalls = [], handlers = [];
+    let created = null, pushReply = null;
+    const TOKEN = "t".repeat(64);
+    const mock = makeMockSupabase();
+    mock.rpc = function(fn, args){
+      rpcCalls.push({ fn, args: JSON.parse(JSON.stringify(args || {})) });
+      let data = null;
+      if (fn === "verify_pin") data = { id:"u1", nickname:"방주", is_admin:false, token:TOKEN };
+      if (fn === "room_create"){ created = args.p_state; data = { code:"ABC234" }; }
+      if (fn === "room_get") data = { code:"ABC234", owner_id:"u1", state:created, updated_at:"2026-10-07T00:00:00Z" };
+      if (fn === "room_push_state") data = pushReply ? pushReply(args) : { ok:true, updated_at:"2026-10-07T00:00:01Z" };
+      if (fn === "room_close" || fn === "sign_out") data = { ok:true };
+      return Promise.resolve({ data, error:null });
+    };
+    const ch = {
+      on: function(kind, filt, fn){ handlers.push({ kind, fn }); return ch; },
+      subscribe: function(cb){ if (cb) cb("SUBSCRIBED"); return ch; },
+      unsubscribe: function(){ return Promise.resolve(); },
+      track: function(){ return Promise.resolve(); },
+      presenceState: function(){ return {}; }
+    };
+    mock.channel = function(){ return ch; };
+    const dom = new JSDOM(HTML, { runScripts:"dangerously", pretendToBeVisual:true, url:"https://example.com/tennis/",
+      beforeParse: function(w){
+        w.SUPABASE_URL = "https://mock.supabase.co"; w.SUPABASE_ANON_KEY = "sb_publishable_test";
+        w.supabase = { createClient: function(){ return mock; } };
+        w.confirm = () => true; w.prompt = () => "테스트 코트";
+      } });
+    const w = dom.window, d = w.document, errs = [];
+    w.addEventListener("error", e => errs.push(String(e.error && e.error.stack || e.message)));
+    w.scrollTo = w.scrollBy = function(){};
+    const $ = q => d.querySelector(q), $$ = (q, r) => [...(r || d).querySelectorAll(q)];
+    const c = { w, d, $, $$ };
+    await sleep(150);
+    const last = fn => rpcCalls.filter(x => x.fn === fn).pop();
+
+    click(w, $("#btn-auth"));
+    $("#mAuth-nick").value = "방주"; $("#mAuth-pin").value = "1234";
+    click(w, $("#mAuth-submit"));
+    await sleep(30);
+    t("로그인하면 토큰을 받고 코트 버튼이 보인다", () => assert(!$("#btn-room").hidden, "btn-room hidden"));
+
+    pickMode(c, "same"); fillNames(c, "p"); click(w, $("#make"));
+    click(w, $("#btn-room"));
+    click(w, $("#mRoom-create"));
+    await sleep(50);
+    t("코트 만들기는 room_create(토큰·제목·상태) → room_get", () => {
+      const cr = last("room_create");
+      assert(cr && cr.args.p_token === TOKEN && cr.args.p_title === "테스트 코트" && cr.args.p_state.schedule, "room_create args");
+      assert(last("room_get") && last("room_get").args.p_code === "ABC234", "room_get");
+      assert(/ABC234/.test($("#btn-room").textContent), "헤더에 코트 코드: " + $("#btn-room").textContent + " / err: " + $("#mRoom-err").textContent + " / " + errs[0]);
+    });
+
+    const sc = () => $$("#sched .score");
+    sc()[0].value = "6"; fire(w, sc()[0], "input");
+    await sleep(900);
+    t("점수 입력 → room_push_state(기준 시각·클라이언트 id)", () => {
+      const p = last("room_push_state");
+      assert(p, "push 없음");
+      assert(p.args.p_token === TOKEN && p.args.p_code === "ABC234", "token/code");
+      assert(p.args.p_base_updated_at === "2026-10-07T00:00:00Z", "base " + p.args.p_base_updated_at);
+      assert(p.args.p_client_id && p.args.p_state.schedule[0].matches[0].sa === 6, "state");
+    });
+    const myId = last("room_push_state").args.p_client_id;
+
+    // 다른 기기가 먼저 2라운드 점수를 썼다 → 충돌 응답 → 합쳐서 재전송
+    const remote = JSON.parse(JSON.stringify(last("room_push_state").args.p_state));
+    remote.schedule[0].matches[0].sa = 6;
+    remote.schedule[1].matches[0].sa = 3; remote.schedule[1].matches[0].sb = 6;
+    let n = 0;
+    pushReply = () => (++n === 1
+      ? { ok:false, conflict:true, state:remote, updated_at:"2026-10-07T00:00:05Z" }
+      : { ok:true, updated_at:"2026-10-07T00:00:06Z" });
+    sc()[1].value = "4"; fire(w, sc()[1], "input");
+    await sleep(900);
+    t("충돌 시 두 기기의 점수를 합쳐 새 기준 시각으로 다시 보낸다", () => {
+      const ps = rpcCalls.filter(x => x.fn === "room_push_state");
+      const p = ps[ps.length - 1];
+      assert(n === 2, "재전송 횟수 " + n);
+      assert(p.args.p_base_updated_at === "2026-10-07T00:00:05Z", "base " + p.args.p_base_updated_at);
+      const m0 = p.args.p_state.schedule[0].matches[0], m1 = p.args.p_state.schedule[1].matches[0];
+      assert(m0.sa === 6 && m0.sb === 4, "내 점수 " + m0.sa + ":" + m0.sb);
+      assert(m1.sa === 3 && m1.sb === 6, "상대 점수 " + m1.sa + ":" + m1.sb);
+      const r1 = $$("#sched .round")[1].querySelectorAll(".score");
+      assert(r1[0].value === "3" && r1[1].value === "6", "화면에도 상대 점수 반영");
+    });
+    pushReply = null;
+
+    const upd = handlers.find(h => h.kind === "postgres_changes").fn;
+    const before = rpcCalls.length;
+    upd({ new: { last_writer: myId, state: { schedule: [] }, updated_at:"2026-10-07T00:00:09Z", is_open:true } });
+    t("내가 쓴 것의 Realtime 에코는 무시", () => assert(sc().length > 0 && sc()[0].value === "6", "에코 반영됨"));
+    const r2 = JSON.parse(JSON.stringify(remote)); r2.schedule[0].matches[0].sb = 4; r2.names[0] = "새이름";
+    upd({ new: { last_writer: "other", state: r2, updated_at:"2026-10-07T00:00:10Z", is_open:true } });
+    t("다른 기기 변경은 화면에 반영되고 재전송하지 않는다", () => {
+      assert(/새이름/.test($("#sched").textContent), "이름 반영");
+      assert(rpcCalls.slice(before).every(x => x.fn !== "room_push_state"), "불필요한 재전송");
+    });
+
+    click(w, $("#btn-room"));
+    t("방주에게 코트 종료 버튼", () => assert($("#mRoom-close") && !$("#mRoom-close").hidden, "mRoom-close"));
+    click(w, $("#mRoom-close"));
+    await sleep(30);
+    t("코트 종료는 room_close(토큰·코드)", () => {
+      const p = last("room_close");
+      assert(p && p.args.p_token === TOKEN && p.args.p_code === "ABC234", "room_close");
+      assert(!/ABC234/.test($("#btn-room").textContent), "코트에서 나옴");
+    });
+
+    click(w, $("#btn-auth"));
+    await sleep(30);
+    t("로그아웃이 오류 없이 되고 sign_out 호출", () => {
+      assert(last("sign_out") && last("sign_out").args.p_token === TOKEN, "sign_out");
+      assert($("#btn-auth").textContent === "로그인", "버튼 " + $("#btn-auth").textContent);
+    });
+    t("rooms 테이블 직접 쓰기 없음", () => {
+      const bad = mock._calls.filter(x => x.table === "rooms" && x.op !== "select");
+      assert(!bad.length, bad.map(x => x.op).join(","));
+      assert(!mock._calls.some(x => x.table === "app_users" || x.table === "app_users_public"), "app_users 직접 조회");
+    });
+    t("런타임 오류 없음", () => assert(!errs.length, errs[0]));
+  }
+
+  console.log("\n=== RPC 경로: 관리자 화면 ===");
+  {
+    const { click } = require("./lib");
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const rpcCalls = [];
+    const TOKEN = "a".repeat(64);
+    const mock = makeMockSupabase();
+    mock.rpc = function(fn, args){
+      rpcCalls.push({ fn, args: JSON.parse(JSON.stringify(args || {})) });
+      let data = { ok:true };
+      if (fn === "verify_pin") data = { id:"ad", nickname:"관리", is_admin:true, token:TOKEN };
+      if (fn === "admin_list_users") data = [{ id:"u1", nickname:"회원1", is_admin:false, created_at:"2026-10-01T00:00:00Z", last_seen_at:null, total_count:1 }];
+      if (fn === "admin_list_rooms") data = [{ code:"ROOM22", title:"수요일", owner_id:"u1", owner_nickname:"회원1", is_open:true, created_at:"2026-10-01T00:00:00Z", updated_at:"2026-10-01T00:00:00Z" }];
+      return Promise.resolve({ data, error:null });
+    };
+    const dom = new JSDOM(HTML, { runScripts:"dangerously", pretendToBeVisual:true, url:"https://example.com/tennis/",
+      beforeParse: function(w){
+        w.SUPABASE_URL = "https://mock.supabase.co"; w.SUPABASE_ANON_KEY = "sb_publishable_test";
+        w.supabase = { createClient: function(){ return mock; } };
+        w.confirm = () => true; w.alert = () => {};
+      } });
+    const w = dom.window, d = w.document, errs = [];
+    w.addEventListener("error", e => errs.push(String(e.error && e.error.stack || e.message)));
+    const $ = q => d.querySelector(q);
+    await sleep(150);
+    const last = fn => rpcCalls.filter(x => x.fn === fn).pop();
+    click(w, $("#btn-auth"));
+    $("#mAuth-nick").value = "관리"; $("#mAuth-pin").value = "1234";
+    click(w, $("#mAuth-submit"));
+    await sleep(30);
+    click(w, $("#btn-admin"));
+    await sleep(30);
+    t("회원 목록은 admin_list_users(토큰·검색·페이지)", () => {
+      const p = last("admin_list_users");
+      assert(p && p.args.p_token === TOKEN && p.args.p_limit === 50 && p.args.p_offset === 0, JSON.stringify(p && p.args));
+      assert(/회원1/.test($("#mAdmin-body").textContent), "목록 렌더");
+    });
+    click(w, d.querySelector('.admin-tab[data-adm="rooms"]'));
+    await sleep(30);
+    t("코트 목록은 admin_list_rooms 이고 코트주 닉네임이 보인다", () => {
+      assert(last("admin_list_rooms") && last("admin_list_rooms").args.p_token === TOKEN, "admin_list_rooms");
+      assert(/ROOM22/.test($("#mAdmin-body").textContent) && /회원1/.test($("#mAdmin-body").textContent), $("#mAdmin-body").textContent.slice(0, 80));
+    });
+    click(w, d.querySelector(".adm-close"));
+    await sleep(30);
+    t("강제 종료는 admin_close_room", () => assert(last("admin_close_room") && last("admin_close_room").args.p_code === "ROOM22", "close"));
+    click(w, d.querySelector(".adm-del"));
+    await sleep(30);
+    t("삭제는 admin_delete_room", () => assert(last("admin_delete_room") && last("admin_delete_room").args.p_code === "ROOM22", "delete"));
+    t("관리자 화면이 테이블을 직접 건드리지 않는다", () =>
+      assert(!mock._calls.some(x => x.table === "app_users" || x.table === "app_users_public" || (x.table === "rooms" && x.op !== "select")), "direct"));
+    t("런타임 오류 없음", () => assert(!errs.length, errs[0]));
+  }
+
   console.log(`\nSupabase 스모크: ${pass} 통과 / ${fail} 실패`);
   process.exit(fail ? 1 : 0);
 }

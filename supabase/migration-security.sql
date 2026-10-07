@@ -19,6 +19,8 @@
 --
 -- ※ 실행 순서: 이 파일을 SQL Editor 에서 먼저 실행 → 그 다음 index.html 배포.
 --   (구 index.html 은 rooms 쓰기가 막혀 실시간 동기화가 멈춘다. 경기 중이 아닐 때 진행할 것)
+-- ※ 함수의 search_path 는 'public, extensions' 다. Supabase 는 pgcrypto(digest, gen_random_bytes)를
+--   extensions 스키마에 두므로 public 만 두면 실행 시 "function digest(text, unknown) does not exist".
 -- ※ 실행 후 기존 로그인 세션은 모두 무효가 된다. 사용자는 한 번 다시 로그인해야 한다.
 --   PIN 해시가 이미 공개되어 있었으므로 어차피 전원 PIN 재설정이 필요하다.
 -- ============================================================================
@@ -44,7 +46,7 @@ revoke all on app_sessions from anon, authenticated;
 -- 토큰 → user_id 해석. 유효하면 만료를 연장한다(사용 중이면 로그아웃되지 않음).
 -- 내부 전용: anon 에게 execute 를 주지 않는다.
 create or replace function app_auth(p_token text)
-returns uuid language plpgsql security definer set search_path = public as $$
+returns uuid language plpgsql security definer set search_path = public, extensions as $$
 declare uid uuid; th text;
 begin
   if p_token is null or length(p_token) < 20 then return null; end if;
@@ -60,7 +62,7 @@ revoke all on function app_auth(text) from anon, authenticated;
 
 -- 토큰 발급 (내부 전용)
 create or replace function app_issue_token(p_user_id uuid)
-returns text language plpgsql security definer set search_path = public as $$
+returns text language plpgsql security definer set search_path = public, extensions as $$
 declare tok text;
 begin
   tok := encode(gen_random_bytes(32), 'hex');
@@ -74,7 +76,7 @@ revoke all on function app_issue_token(uuid) from anon, authenticated;
 
 -- 관리자 확인 (내부 전용)
 create or replace function app_require_admin(p_token text)
-returns uuid language plpgsql security definer set search_path = public as $$
+returns uuid language plpgsql security definer set search_path = public, extensions as $$
 declare uid uuid;
 begin
   uid := app_auth(p_token);
@@ -99,7 +101,7 @@ alter table app_users add column if not exists pin_locked_until  timestamptz;
 
 -- 로그인. 성공하면 { id, nickname, is_admin, token } 을 돌려준다.
 create or replace function verify_pin(p_nickname text, p_pin text)
-returns json language plpgsql security definer set search_path = public as $$
+returns json language plpgsql security definer set search_path = public, extensions as $$
 declare u record; computed_hash text; tok text;
 begin
   select id, pin_hash, pin_salt, coalesce(is_admin,false) as is_admin,
@@ -136,7 +138,7 @@ end; $$;
 
 -- 회원가입. 가입 즉시 로그인 상태가 되도록 토큰을 함께 돌려준다 (기존 동작과 동일).
 create or replace function create_account(p_nickname text, p_pin text)
-returns json language plpgsql security definer set search_path = public as $$
+returns json language plpgsql security definer set search_path = public, extensions as $$
 declare new_salt text; new_hash text; new_id uuid; tok text;
 begin
   if p_pin !~ '^[0-9]{4}$' then raise exception 'PIN_INVALID'; end if;
@@ -152,7 +154,7 @@ exception when unique_violation then raise exception 'NICKNAME_TAKEN'; end; $$;
 -- PIN 변경. user_id 를 클라이언트가 주장하던 것을 토큰 기반으로 바꾼다.
 drop function if exists change_pin(uuid, text, text);
 create or replace function change_pin(p_token text, p_cur_pin text, p_new_pin text)
-returns json language plpgsql security definer set search_path = public as $$
+returns json language plpgsql security definer set search_path = public, extensions as $$
 declare uid uuid; u record; cur_hash text; new_salt text; new_hash text;
 begin
   uid := app_auth(p_token);
@@ -172,7 +174,7 @@ end; $$;
 
 -- 앱 부팅 시 "내가 누구인지" 재확인. app_users 직접 조회를 대체한다.
 create or replace function me(p_token text)
-returns json language plpgsql security definer set search_path = public as $$
+returns json language plpgsql security definer set search_path = public, extensions as $$
 declare uid uuid; u record;
 begin
   uid := app_auth(p_token);
@@ -184,7 +186,7 @@ end; $$;
 
 -- 로그아웃 — 이 기기의 세션만 지운다
 create or replace function sign_out(p_token text)
-returns json language plpgsql security definer set search_path = public as $$
+returns json language plpgsql security definer set search_path = public, extensions as $$
 begin
   if p_token is not null then
     delete from app_sessions where token_hash = encode(digest(p_token,'sha256'),'hex');
@@ -223,7 +225,7 @@ alter table rooms add column if not exists last_writer text;
 
 -- 방 만들기 — 코드는 서버가 생성하고 중복 시 재시도한다. owner_id 는 토큰에서 온다.
 create or replace function room_create(p_token text, p_title text, p_state jsonb)
-returns json language plpgsql security definer set search_path = public as $$
+returns json language plpgsql security definer set search_path = public, extensions as $$
 declare uid uuid; new_code text; chars text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; i int; k int;
 begin
   uid := app_auth(p_token);
@@ -249,7 +251,7 @@ end; $$;
 --   그때는 쓰지 않고 최신 상태를 돌려준다 (클라이언트가 병합 후 재시도).
 create or replace function room_push_state(p_token text, p_code text, p_state jsonb,
                                            p_client_id text, p_base_updated_at timestamptz)
-returns json language plpgsql security definer set search_path = public as $$
+returns json language plpgsql security definer set search_path = public, extensions as $$
 declare uid uuid; cur record; newts timestamptz;
 begin
   uid := app_auth(p_token);
@@ -268,7 +270,7 @@ end; $$;
 
 -- 방 접속 — is_open 인 방만 연다 (종료된 코트는 이력으로만 본다는 원래 규칙 복원)
 create or replace function room_get(p_code text)
-returns json language plpgsql security definer set search_path = public as $$
+returns json language plpgsql security definer set search_path = public, extensions as $$
 declare r record;
 begin
   select code, title, owner_id, state, is_open, updated_at into r from rooms where code = p_code;
@@ -280,7 +282,7 @@ end; $$;
 
 -- 코트 종료 (주인만)
 create or replace function room_close(p_token text, p_code text)
-returns json language plpgsql security definer set search_path = public as $$
+returns json language plpgsql security definer set search_path = public, extensions as $$
 declare uid uuid; own uuid;
 begin
   uid := app_auth(p_token);
@@ -311,7 +313,7 @@ create or replace function admin_list_users(p_token text, p_search text,
                                             p_limit int default 50, p_offset int default 0)
 returns table(id uuid, nickname text, is_admin boolean,
               created_at timestamptz, last_seen_at timestamptz, total_count bigint)
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, extensions as $$
 declare q text;
 begin
   perform app_require_admin(p_token);
@@ -330,7 +332,7 @@ end; $$;
 create or replace function admin_list_rooms(p_token text)
 returns table(code text, title text, owner_id uuid, owner_nickname text,
               is_open boolean, created_at timestamptz, updated_at timestamptz)
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, extensions as $$
 begin
   perform app_require_admin(p_token);
   return query
@@ -340,7 +342,7 @@ begin
 end; $$;
 
 create or replace function admin_close_room(p_token text, p_code text)
-returns json language plpgsql security definer set search_path = public as $$
+returns json language plpgsql security definer set search_path = public, extensions as $$
 begin
   perform app_require_admin(p_token);
   update rooms set is_open = false where code = p_code;
@@ -349,7 +351,7 @@ begin
 end; $$;
 
 create or replace function admin_delete_room(p_token text, p_code text)
-returns json language plpgsql security definer set search_path = public as $$
+returns json language plpgsql security definer set search_path = public, extensions as $$
 begin
   perform app_require_admin(p_token);
   delete from rooms where code = p_code;

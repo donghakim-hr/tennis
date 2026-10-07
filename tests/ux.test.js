@@ -215,6 +215,11 @@ const isClosed = (ctx, key) => ctx.d.querySelector('[data-fold="' + key + '"]').
       });
       const nX = sched.filter(r => r.flat(2).includes(4)).length;
       R.ok(sched.length > nX, `${games}경기: 하이브리드(혼복 ${nX} + 남자 동복 ${sched.length - nX}라운드)로 짜였다`);
+      const restOk = $$("#sched .round").every(r => {
+        const rest = r.querySelector(".rest b");
+        return $$(".nm", r).length * 2 + (rest ? rest.textContent.split(",").length : 0) === 6;
+      });
+      R.ok(restOk, `${games}경기: 남자끼리 라운드에서 쉬는 여자도 휴식 명단에 나온다`);
       R.ok(Math.max(...mx) <= 2, `${games}경기: 여자 2명 최장 연속 ${Math.max(...mx)}경기 (≤2) — 혼복 라운드를 몰아넣지 않는다`);
       click(w, $("#mode-change"));   // 설정으로 돌아가 다음 경기 수
       if ($("#intro") && !$("#intro").hidden) pickMode(ctx, "mixed");
