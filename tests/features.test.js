@@ -80,7 +80,8 @@ const { boot, click, fire, sleep, pickMode, fillNames, reporter } = require("./l
     R.info("URL 길이: " + url.length + "자");
     R.ok(url.length < 8000, "URL이 상한(8000자) 안");
 
-    const strip = t => t.replace(/공유받은 결과를 보고 있습니다[\s\S]*?수정하기/g, "");
+    // ▲▼(라운드 순서 버튼)는 편집 화면에만 있으므로 비교에서 뺀다
+    const strip = t => t.replace(/공유받은 결과를 보고 있습니다[\s\S]*?수정하기/g, "").replace(/[▲▼]/g, "");
     const originalSched = strip(A.$("#sched").textContent);
     const originalHead = A.$("#sched p").textContent;
 

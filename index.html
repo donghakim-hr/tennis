@@ -177,6 +177,13 @@ window.SUPABASE_ANON_KEY = "sb_publishable_X_1Y6-P3pCaFpqdTg32www_RCxpd4DH";
     margin-left:auto;font-variant-numeric:tabular-nums;
   }
   .round-tag.full{color:var(--win)}
+  /* 라운드 순서 바꾸기 (▲▼) — 코트장에서 손가락으로 누르므로 44px */
+  .round-mv{
+    width:44px;height:44px;flex:none;padding:0;
+    border:1px solid var(--hair);border-radius:10px;
+    background:var(--card);color:var(--ink);font-size:15px;line-height:1;cursor:pointer;
+  }
+  .round-mv:disabled{color:var(--hair);cursor:default}
   .rest{
     margin-top:10px;font-size:12.5px;color:var(--muted);
     display:flex;gap:6px;align-items:center;flex-wrap:wrap;
@@ -800,125 +807,117 @@ if (window.SUPABASE_URL && window.SUPABASE_ANON_KEY && window.supabase && window
   } catch(e){ sb = null; }
 }
 
-// 로그인 상태 (localStorage에 user id/nickname만 저장, PIN은 저장 안 함)
+// 이 탭을 식별하는 임의 ID — Realtime 에코를 '시각'이 아니라 '신원'으로 걸러낸다
+var CLIENT_ID = "c" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+// 로그인 상태 (localStorage에 id/nickname/세션토큰만. PIN은 저장하지 않는다)
+// token 은 서버가 발급한 세션 토큰이다. 서버는 이것으로만 호출자를 식별한다 —
+// id 를 클라이언트가 주장하던 예전 방식은 남의 id 를 넣으면 그대로 통과했다.
 var AUTH_KEY = CONST.STORAGE.AUTH;
-var Me = null;   // { id, nickname }
+var Me = null;   // { id, nickname, is_admin, token }
 try {
   var raw = window.localStorage && window.localStorage.getItem(AUTH_KEY);
   if (raw) Me = JSON.parse(raw);
-} catch(e){}
+  if (Me && !Me.token) Me = null;   // 토큰 없는 구버전 세션은 무효 (한 번 다시 로그인)
+} catch(e){ Me = null; }
 
 function setMe(u){
   Me = u;
   try {
-    if (u) window.localStorage.setItem(AUTH_KEY, JSON.stringify({id:u.id, nickname:u.nickname, is_admin:!!u.is_admin}));
+    if (u) window.localStorage.setItem(AUTH_KEY, JSON.stringify({
+      id:u.id, nickname:u.nickname, is_admin:!!u.is_admin, token:u.token
+    }));
     else   window.localStorage.removeItem(AUTH_KEY);
   } catch(e){}
 }
+function authToken(){ return Me && Me.token ? Me.token : null; }
 
-// 서버에서 is_admin 조회 (컬럼이 없어도 false로 그레이스풀 처리)
-// app_users_public 뷰 사용 (pin_hash/salt 노출 없음)
-function fetchIsAdmin(userId){
-  if (!sb || !userId) return Promise.resolve(false);
-  return sb.from("app_users_public").select("is_admin").eq("id", userId).maybeSingle()
-    .then(function(res){ return !!(res.data && res.data.is_admin); })
-    ["catch"](function(){
-      // 뷰가 아직 안 만들어졌으면 legacy 테이블 폴백
-      return sb.from("app_users").select("is_admin").eq("id", userId).maybeSingle()
-        .then(function(r2){ return !!(r2.data && r2.data.is_admin); })
-        ["catch"](function(){ return false; });
-    });
-}
-
-// 앱 시작 시 서버에서 사용자·admin 재확인
+// 앱 시작 시 서버에서 사용자·admin 재확인.
+// is_admin 을 localStorage 에서 믿지 않는다 — 관리자 RPC 는 어차피 서버가 토큰으로 다시 검사한다.
 function refreshMeFromServer(){
   if (!sb || !Me) return Promise.resolve();
-  return sb.from("app_users_public").select("id,nickname,is_admin").eq("id", Me.id).maybeSingle()
-    .then(function(res){
-      if (res.data){
-        setMe({ id: res.data.id, nickname: res.data.nickname, is_admin: !!res.data.is_admin });
-        return;
-      }
-      // 뷰 없으면 legacy 테이블 폴백
-      return sb.from("app_users").select("id,nickname").eq("id", Me.id).maybeSingle()
-        .then(function(r2){
-          if (!r2.data){ setMe(null); return; }
-          return fetchIsAdmin(r2.data.id).then(function(isAdmin){
-            setMe({ id: r2.data.id, nickname: r2.data.nickname, is_admin: isAdmin });
-          });
-        });
-    })["catch"](function(){ /* 오프라인은 무시 */ });
-}
-
-// SHA-256 해싱 (PIN + salt) — 4자리 PIN이라 salt가 필수
-function toHex(buf){
-  var a = new Uint8Array(buf), s = "";
-  for (var i=0;i<a.length;i++){ s += ("0"+a[i].toString(16)).slice(-2); }
-  return s;
-}
-function randSalt(){
-  var a = new Uint8Array(16);
-  (window.crypto || window.msCrypto).getRandomValues(a);
-  return toHex(a.buffer);
-}
-function hashPin(pin, salt){
-  var enc = new TextEncoder().encode(pin + ":" + salt);
-  return (window.crypto || window.msCrypto).subtle.digest("SHA-256", enc).then(toHex);
+  return sb.rpc("me", { p_token: Me.token }).then(function(res){
+    if (res.error) return;                       // 네트워크/일시 오류는 로그인 상태를 건드리지 않는다
+    if (!res.data){ setMe(null); return; }       // 토큰 만료·폐기 → 로그아웃
+    setMe({ id: res.data.id, nickname: res.data.nickname,
+            is_admin: !!res.data.is_admin, token: Me.token });
+  })["catch"](function(){ /* 오프라인은 무시 */ });
 }
 
 // PostgREST 에러 메시지를 사용자 친화적 문구로 변환
 function mapAuthErr(err){
   var msg = (err && err.message) ? err.message : String(err);
   if (/PIN_INVALID/.test(msg)) return new Error("PIN은 숫자 4자리");
+  if (/PIN_COOLDOWN/.test(msg)) return new Error("PIN을 여러 번 틀렸습니다. 10분 뒤에 다시 시도해주세요");
   if (/NICKNAME_INVALID/.test(msg)) return new Error("닉네임은 2~20자");
   if (/NICKNAME_TAKEN/.test(msg)) return new Error("이미 쓰는 닉네임입니다");
   if (/PIN_MISMATCH/.test(msg)) return new Error("현재 PIN이 틀립니다");
+  if (/AUTH_REQUIRED/.test(msg)) return new Error("로그인이 만료되었습니다. 다시 로그인해주세요");
+  if (/FORBIDDEN/.test(msg)) return new Error("권한이 없습니다");
+  if (/NOT_OWNER/.test(msg)) return new Error("코트 주인만 할 수 있습니다");
+  if (/ROOM_NOT_FOUND/.test(msg)) return new Error("없는 코트입니다");
+  if (/ROOM_CLOSED/.test(msg)) return new Error("종료된 코트입니다");
+  if (/CODE_COLLISION/.test(msg)) return new Error("코트 코드 생성에 실패했습니다. 다시 시도해주세요");
   if (/NOT_FOUND/.test(msg)) return new Error("계정을 찾을 수 없습니다");
   return new Error(msg);
 }
 
-// 회원가입: 서버측 RPC create_account (pin_hash 는 서버에서 생성)
+// 토큰 만료를 한 곳에서 처리한다 (여러 화면이 제각각 처리하면 상태가 어긋난다)
+function onAuthLost(){
+  setMe(null);
+  if (Room.channel){ try { Room.channel.unsubscribe(); } catch(e){} Room.channel = null; }
+  Room.code = null;
+  if (typeof refreshAuthUI === "function") refreshAuthUI();
+}
+function rpc(fn, args){
+  if (!sb) return Promise.reject(new Error("Supabase 설정이 없습니다"));
+  return sb.rpc(fn, args).then(function(res){
+    if (res.error){
+      var e = mapAuthErr(res.error);
+      if (/AUTH_REQUIRED/.test(res.error.message || "")) onAuthLost();
+      throw e;
+    }
+    return res.data;
+  });
+}
+
+// 회원가입: 서버측 RPC create_account (pin_hash 는 서버에서 생성, 토큰까지 함께 발급)
 function signUp(nickname, pin){
   if (!sb) return Promise.reject(new Error("Supabase 설정이 없습니다"));
   if (!/^\d{4}$/.test(pin)) return Promise.reject(new Error("PIN은 숫자 4자리"));
   if (!nickname || nickname.length < 2 || nickname.length > 20) return Promise.reject(new Error("닉네임은 2~20자"));
-  return sb.rpc("create_account", { p_nickname: nickname, p_pin: pin })
-    .then(function(res){
-      if (res.error) throw mapAuthErr(res.error);
-      var data = res.data || {};
-      var u = { id: data.id, nickname: data.nickname, is_admin: !!data.is_admin };
-      setMe(u); return u;
-    });
+  return rpc("create_account", { p_nickname: nickname, p_pin: pin }).then(function(data){
+    data = data || {};
+    if (!data.token) throw new Error("가입에 실패했습니다");
+    var u = { id: data.id, nickname: data.nickname, is_admin: !!data.is_admin, token: data.token };
+    setMe(u); return u;
+  });
 }
 
 // 로그인: 서버측 RPC verify_pin (pin_hash 클라이언트 노출 없음)
 function signIn(nickname, pin){
-  if (!sb) return Promise.reject(new Error("Supabase 설정이 없습니다"));
-  return sb.rpc("verify_pin", { p_nickname: nickname, p_pin: pin })
-    .then(function(res){
-      if (res.error) throw mapAuthErr(res.error);
-      if (!res.data) throw new Error("닉네임 또는 PIN이 틀립니다");
-      var data = res.data;
-      var u = { id: data.id, nickname: data.nickname, is_admin: !!data.is_admin };
-      setMe(u); return u;
-    });
+  return rpc("verify_pin", { p_nickname: nickname, p_pin: pin }).then(function(data){
+    if (!data || !data.token) throw new Error("닉네임 또는 PIN이 틀립니다");
+    var u = { id: data.id, nickname: data.nickname, is_admin: !!data.is_admin, token: data.token };
+    setMe(u); return u;
+  });
 }
 
 function signOut(){
+  var tok = authToken();
   if (Room.channel){ try { Room.channel.unsubscribe(); } catch(e){} Room.channel = null; }
-  Room.code = null;
+  Room.code = null; Room.presence = []; Room.baseUpdatedAt = null; Room.pending = {};
+  _lastPushedState = null;
   setMe(null);
+  // 서버 세션도 정리한다 (실패해도 로컬은 이미 로그아웃 상태)
+  if (sb && tok) sb.rpc("sign_out", { p_token: tok })["catch"](function(){});
 }
 
-// PIN 변경: 서버측 RPC change_pin
+// PIN 변경: 서버측 RPC change_pin (토큰으로 본인 확인 → 다른 기기 세션은 끊긴다)
 function changePin(curPin, newPin){
-  if (!sb || !Me) return Promise.reject(new Error("로그인 필요"));
+  if (!authToken()) return Promise.reject(new Error("로그인 필요"));
   if (!/^\d{4}$/.test(newPin)) return Promise.reject(new Error("PIN은 숫자 4자리"));
-  return sb.rpc("change_pin", { p_user_id: Me.id, p_cur_pin: curPin, p_new_pin: newPin })
-    .then(function(res){
-      if (res.error) throw mapAuthErr(res.error);
-      return res.data;
-    });
+  return rpc("change_pin", { p_token: authToken(), p_cur_pin: curPin, p_new_pin: newPin });
 }
 
 /* ---------------- 방 시스템 ---------------- */
@@ -1689,26 +1688,85 @@ function buildSchedule(cfg){
 }
 
 // 하이브리드 스케줄: 혼복 phase → 다수 성별 동복 phase
+// 그냥 이어 붙이면 소수 성별이 앞쪽 혼복 라운드를 내리 뛰고 뒤에서 내리 쉰다
+// (남4·여2 → 여자 2명이 1~4라운드 연속). 두 phase를 섞어 연속 출전을 흩고,
+// 혼복 라운드에서 누가 뛰는지에 따라 섞는 결과가 달라지므로 여러 번 짜서 가장 나은 것을 고른다.
 function buildHybridSchedule(cfg, hp, cap){
-  // Phase 1: 혼복 라운드
-  var phase1 = attempt({
-    n: cfg.n, rounds: hp.mixedRounds, courts: cfg.courts, lv: cfg.lv,
-    type: "mixed", genders: cfg.genders, anchor: true, cap: cap
-  });
-  if (hp.sameRounds === 0) return phase1.rounds;
-  // Phase 2: 다수 성별만 뛰는 동복 라운드
   var majorityIdx = [];
   for (var i=0; i<cfg.n; i++){
     var gi = cfg.genders[i];
     if (hp.majorityGender === "M" && gi !== "F") majorityIdx.push(i);
     if (hp.majorityGender === "F" && gi === "F") majorityIdx.push(i);
   }
-  var phase2 = attempt({
-    n: cfg.n, rounds: hp.sameRounds, courts: cfg.courts, lv: cfg.lv,
-    type: "same", genders: cfg.genders, anchor: false, cap: cap,
-    seed: phase1.state, eligiblePool: majorityIdx
-  });
-  return phase1.rounds.concat(phase2.rounds);
+  var best = null, bestScore = Infinity;
+  for (var t=0; t<12; t++){
+    // Phase 1: 혼복 라운드
+    var phase1 = attempt({
+      n: cfg.n, rounds: hp.mixedRounds, courts: cfg.courts, lv: cfg.lv,
+      type: "mixed", genders: cfg.genders, anchor: true, cap: cap
+    });
+    if (hp.sameRounds === 0) return phase1.rounds;
+    // Phase 2: 다수 성별만 뛰는 동복 라운드
+    var phase2 = attempt({
+      n: cfg.n, rounds: hp.sameRounds, courts: cfg.courts, lv: cfg.lv,
+      type: "same", genders: cfg.genders, anchor: false, cap: cap,
+      seed: phase1.state, eligiblePool: majorityIdx
+    });
+    var mix = interleaveRounds(phase1.rounds, phase2.rounds, cfg.n);
+    var vio = 0;
+    streaksOf(mix.rounds, cfg.n).forEach(function(m){ if (m >= 4) vio++; });
+    var score = phase1.cost + phase2.cost + mix.cost + vio * 60;
+    if (score < bestScore){ bestScore = score; best = mix.rounds; }
+  }
+  return best;
+}
+
+// 두 라운드 묶음을 각자의 내부 순서는 지키면서 섞는다. 1라운드는 A[0] 고정(코트1 고정 유지).
+// 비용 = 선수별 연속 출전 구간 (길이-1)² 합 ×10 + 연속 휴식 구간 (길이-1)² 합 → 최소인 배치를 고른다.
+// 반환: { rounds, cost }
+function interleaveRounds(A, B, n){
+  if (!B.length) return { rounds: A.slice(), cost: 0 };
+  var T = A.length + B.length;
+  var plays = function(rd){
+    var p = new Array(n).fill(false);
+    rd.matches.forEach(function(m){ m.a.concat(m.b).forEach(function(x){ p[x] = true; }); });
+    return p;
+  };
+  var pa = A.map(plays), pb = B.map(plays);
+  function cost(seq){   // seq: 0=A, 1=B
+    var c = 0, ia, ib, i, k, run, rest, p;
+    for (i=0;i<n;i++){
+      ia = 0; ib = 0; run = 0; rest = 0;
+      for (k=0;k<T;k++){
+        p = seq[k] === 0 ? pa[ia++][i] : pb[ib++][i];
+        if (p){ run++; if (run > 1) c += 10*(2*run-3); rest = 0; }
+        else  { rest++; if (rest > 1) c += 2*rest-3; run = 0; }
+      }
+    }
+    return c;
+  }
+  var best = null, bestC = Infinity, seq = [0], ways = 1;
+  for (var w=1; w<=B.length; w++) ways = ways * (T - 1 - B.length + w) / w;   // C(T-1, |B|)
+  // A를 놓을 위치 조합을 전부 훑는다 (경우의 수가 너무 많으면 고르게 흩은 배치로 대체)
+  if (ways <= 50000) (function rec(na, nb){
+    if (na === A.length && nb === B.length){
+      var c = cost(seq);
+      if (c < bestC){ bestC = c; best = seq.slice(); }
+      return;
+    }
+    if (na < A.length){ seq.push(0); rec(na+1, nb); seq.pop(); }
+    if (nb < B.length){ seq.push(1); rec(na, nb+1); seq.pop(); }
+  })(1, 0);
+  if (!best){   // 폴백: B를 A 사이에 고르게
+    best = [0];
+    for (var k=1, na=1, nb=0; k<T; k++){
+      if (nb < B.length && (na >= A.length || (nb+1)/B.length <= na/A.length)){ best.push(1); nb++; }
+      else { best.push(0); na++; }
+    }
+  }
+  var out = [], ia = 0, ib = 0;
+  best.forEach(function(s){ out.push(s === 0 ? A[ia++] : B[ib++]); });
+  return { rounds: out, cost: bestC === Infinity ? cost(best) : bestC };
 }
 
 // 복식이면 중복 페어 수, 단식이면 중복 대진 수
@@ -2647,7 +2705,12 @@ function renderSchedule(){
     rd.matches.forEach(function(m){ if (filled(m)) dn++; });
     h.innerHTML = '<span class="round-no">'+(ri+1)+'라운드</span>'
       + '<span class="round-tag' + (dn === rd.matches.length ? " full" : "") + '">'
-      + dn + ' / ' + rd.matches.length + '</span>';
+      + dn + ' / ' + rd.matches.length + '</span>'
+      + (viewOnly ? "" :
+          '<button type="button" class="round-mv" data-mv="-1" data-r="' + ri + '"'
+          + (ri === 0 ? " disabled" : "") + ' aria-label="' + (ri+1) + '라운드를 앞으로">▲</button>'
+        + '<button type="button" class="round-mv" data-mv="1" data-r="' + ri + '"'
+          + (ri === S.schedule.length-1 ? " disabled" : "") + ' aria-label="' + (ri+1) + '라운드를 뒤로">▼</button>');
     sec.appendChild(h);
 
     rd.matches.forEach(function(m, mi){
@@ -2726,6 +2789,8 @@ $("#sched").addEventListener("input", function(e){
 $("#sched").addEventListener("click", function(e){
   var t = e.target;
   if (!t.closest) return;
+  var mv = t.closest(".round-mv");
+  if (mv){ if (!viewOnly && !mv.disabled) moveRound(+mv.dataset.r, +mv.dataset.mv); return; }
   if (t.classList && t.classList.contains("score")){
     if (viewOnly) toast("공유받은 결과입니다. 점수는 수정할 수 없습니다");
     return;
@@ -2736,6 +2801,21 @@ $("#sched").addEventListener("click", function(e){
   inp.focus();
   try { inp.select(); } catch(_){}
 });
+
+/* 라운드 순서 바꾸기 — 그 라운드의 대진·점수·휴식이 통째로 자리를 바꾼다 */
+function moveRound(ri, dir){
+  var to = ri + dir;
+  if (!S.schedule || to < 0 || to >= S.schedule.length) return;
+  var secs = $("#sched").querySelectorAll(".round");
+  var before = secs[ri] ? secs[ri].getBoundingClientRect().top : null;
+  var tmp = S.schedule[ri]; S.schedule[ri] = S.schedule[to]; S.schedule[to] = tmp;
+  S.savedAt = Date.now(); dirty = false;   // 점수 자동 저장과 같은 방식으로 즉시 저장
+  save(); render();
+  // 옮긴 라운드가 화면에서 같은 자리에 보이게 (연달아 눌러 여러 칸 옮길 수 있도록)
+  var after = $("#sched").querySelectorAll(".round")[to];
+  if (after && before !== null) window.scrollBy(0, after.getBoundingClientRect().top - before);
+  toast((ri+1) + "라운드 → " + (to+1) + "라운드로 옮김");
+}
 
 /* 이미 값이 있는 칸은 전체 선택 — 백스페이스 없이 덮어쓰게 (6에 7을 치면 67이 되던 문제) */
 $("#sched").addEventListener("focusin", function(e){

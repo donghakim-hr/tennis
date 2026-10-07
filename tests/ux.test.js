@@ -1,6 +1,6 @@
-// UI/UX 동작 테스트 — 접이식 설정, 점수 입력, 탭, 코트 수, 명단 불러오기
+// UI/UX 동작 테스트 — 접이식 설정, 점수 입력, 탭, 코트 수, 명단 불러오기, 라운드 순서 바꾸기
 // 실행: node tests/ux.test.js
-const { boot, click, fire, sleep, pickMode, fillNames, reporter } = require("./lib");
+const { boot, click, fire, sleep, pickMode, fillNames, readSchedule, reporter } = require("./lib");
 
 const foldState = ctx => ctx.$$("#setup .fold")
   .map(c => c.dataset.fold + (c.classList.contains("closed") ? ":접힘" : ":펼침")).join(" ");
@@ -185,6 +185,59 @@ const isClosed = (ctx, key) => ctx.d.querySelector('[data-fold="' + key + '"]').
     click(B.w, B.$("#make"));                  // 열람 중 대진 생성 시도
     R.ok(B.$("#sched").textContent === before, "열람 중 '대진표 만들기'는 확인을 거절하면 아무 일도 하지 않는다");
     R.ok(B.$$("#sched .score").every(s => s.hasAttribute("readonly")), "여전히 읽기 전용");
+  }
+
+  // ---------- H. 혼복 성별 불균형 · 라운드 순서 바꾸기 ----------
+  R.section("혼복 남4·여2 연속 출전 · 라운드 순서 바꾸기");
+  {
+    const ctx = boot();
+    const { w, $, $$ } = ctx;
+    await sleep(150);
+    pickMode(ctx, "mixed");
+    let guard = 30;
+    while (+$("#p-val").textContent > 6 && guard--) click(w, $("#p-minus"));
+    while (+$("#p-val").textContent < 6 && guard--) click(w, $("#p-plus"));
+    // 기본은 남·여 번갈아 → 0~3번 남, 4·5번 여
+    [1, 3, 4].forEach(k => click(w, $$("#names .gbtn")[k]));
+    const gs = $$("#names .gbtn").map(b => b.textContent).join("");
+    R.ok(gs === "남남남남여여", "성별을 남4·여2로 설정: " + gs);
+    click(w, $$("#c-chips button").find(b => +b.dataset.c === 1));
+
+    for (const games of [3, 4, 5]) {
+      click(w, $$("#r-chips button").find(b => +b.dataset.r === games));
+      fillNames(ctx, "p");
+      click(w, $("#make"));
+      const sched = readSchedule(ctx);
+      let run = [0, 0], mx = [0, 0];
+      sched.forEach(r => {
+        const inP = new Set(r.flat(2));
+        [4, 5].forEach((p, k) => { run[k] = inP.has(p) ? run[k] + 1 : 0; mx[k] = Math.max(mx[k], run[k]); });
+      });
+      const nX = sched.filter(r => r.flat(2).includes(4)).length;
+      R.ok(sched.length > nX, `${games}경기: 하이브리드(혼복 ${nX} + 남자 동복 ${sched.length - nX}라운드)로 짜였다`);
+      R.ok(Math.max(...mx) <= 2, `${games}경기: 여자 2명 최장 연속 ${Math.max(...mx)}경기 (≤2) — 혼복 라운드를 몰아넣지 않는다`);
+      click(w, $("#mode-change"));   // 설정으로 돌아가 다음 경기 수
+      if ($("#intro") && !$("#intro").hidden) pickMode(ctx, "mixed");
+    }
+
+    click(w, $("#make"));
+    const mv = (ri, dir) => $$("#sched .round")[ri].querySelector('.round-mv[data-mv="' + dir + '"]');
+    R.ok(mv(0, -1).disabled && !mv(0, 1).disabled, "1라운드는 ▲ 비활성 · ▼ 활성");
+    const last = $$("#sched .round").length - 1;
+    R.ok(mv(last, 1).disabled, "마지막 라운드는 ▼ 비활성");
+    const sc = $$("#sched .round")[0].querySelectorAll(".score");
+    sc[0].value = "6"; fire(w, sc[0], "input");
+    sc[1].value = "2"; fire(w, sc[1], "input");
+    const r0 = JSON.stringify(readSchedule(ctx)[0]), r1 = JSON.stringify(readSchedule(ctx)[1]);
+    click(w, mv(0, 1));
+    const after = readSchedule(ctx);
+    R.ok(JSON.stringify(after[0]) === r1 && JSON.stringify(after[1]) === r0, "▼로 1·2라운드 자리가 바뀐다");
+    const moved = $$("#sched .round")[1].querySelectorAll(".score");
+    R.ok(moved[0].value === "6" && moved[1].value === "2", "점수가 라운드와 함께 옮겨진다");
+    click(w, mv(1, -1));
+    R.ok(JSON.stringify(readSchedule(ctx)[0]) === r0, "▲로 되돌릴 수 있다");
+    R.ok(/"sa":6/.test(w.localStorage.getItem("tennis:sessions") || ""), "순서 변경이 바로 저장된다");
+    R.ok(ctx.errs.length === 0, "런타임 오류 없음" + (ctx.errs.length ? ": " + ctx.errs[0] : ""));
   }
 
   process.exit(R.done() ? 1 : 0);
