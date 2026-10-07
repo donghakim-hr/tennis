@@ -177,13 +177,35 @@ window.SUPABASE_ANON_KEY = "sb_publishable_X_1Y6-P3pCaFpqdTg32www_RCxpd4DH";
     margin-left:auto;font-variant-numeric:tabular-nums;
   }
   .round-tag.full{color:var(--win)}
-  /* 라운드 순서 바꾸기 (▲▼) — 코트장에서 손가락으로 누르므로 44px */
-  .round-mv{
+  /* 라운드 순서 바꾸기 — 대진표 위 버튼 + 시트(손잡이 드래그 · ▲▼) */
+  .ord-open{display:block;width:100%;margin-top:10px;padding:11px;font-size:13px}
+  .ord-list{margin:12px 0 0;padding:0;list-style:none;max-height:58vh;overflow:auto;position:relative}
+  .ord-row{
+    display:flex;align-items:center;gap:6px;
+    margin-bottom:6px;padding:4px 4px 4px 0;
+    background:var(--card);border:1px solid var(--hair);border-radius:12px;
+    position:relative;
+  }
+  .ord-row.dragging{z-index:5;border-color:var(--court);box-shadow:0 6px 20px rgba(14,26,38,.18)}
+  .ord-handle{
+    width:44px;height:44px;flex:none;padding:0;border:0;background:none;
+    color:var(--muted);font-size:20px;line-height:1;cursor:grab;
+    touch-action:none;-webkit-user-select:none;user-select:none;
+  }
+  .ord-row.dragging .ord-handle{cursor:grabbing;color:var(--court)}
+  .ord-no{flex:none;width:30px;font-weight:800;font-variant-numeric:tabular-nums}
+  .ord-body{flex:1;min-width:0;font-size:12.5px;line-height:1.35}
+  .ord-body .vs{color:var(--muted);font-weight:700;margin:0 3px}
+  .ord-body .bye{display:block;color:var(--muted);font-size:11.5px}
+  .ord-body .done{color:var(--win);font-weight:800;font-size:11.5px;margin-left:4px}
+  .ord-mv{
     width:44px;height:44px;flex:none;padding:0;
     border:1px solid var(--hair);border-radius:10px;
-    background:var(--card);color:var(--ink);font-size:15px;line-height:1;cursor:pointer;
+    background:var(--card);color:var(--ink);font-size:14px;line-height:1;cursor:pointer;
   }
-  .round-mv:disabled{color:var(--hair);cursor:default}
+  .ord-mv:disabled{color:var(--hair);cursor:default}
+  .ord-sum{margin:10px 0 0;font-size:12.5px;color:var(--muted)}
+  .ord-sum.bad{color:#8f2f2f;font-weight:700}
   .rest{
     margin-top:10px;font-size:12.5px;color:var(--muted);
     display:flex;gap:6px;align-items:center;flex-wrap:wrap;
@@ -744,6 +766,21 @@ window.SUPABASE_ANON_KEY = "sb_publishable_X_1Y6-P3pCaFpqdTg32www_RCxpd4DH";
 </div>
 
 <!-- 코트(방) 모달 -->
+<!-- 라운드 순서 바꾸기 -->
+<div class="modal" id="mOrder" hidden>
+  <div class="modal-card" role="dialog" aria-labelledby="mOrder-title">
+    <button class="modal-close" data-close aria-label="닫기">×</button>
+    <h3 id="mOrder-title">라운드 순서 바꾸기</h3>
+    <p class="mAuth-hint">≡ 를 잡고 끌거나 ▲▼ 로 옮기세요. 점수는 라운드와 함께 옮겨집니다.</p>
+    <ul class="ord-list" id="mOrder-list"></ul>
+    <p class="ord-sum" id="mOrder-sum" aria-live="polite"></p>
+    <div class="modal-actions">
+      <button class="btn ghost" type="button" data-close>취소</button>
+      <button class="btn" type="button" id="mOrder-done">완료</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="mRoom" hidden>
   <div class="modal-card">
     <button class="modal-close" data-close aria-label="닫기">×</button>
@@ -2806,6 +2843,16 @@ function renderSchedule(){
     host.appendChild(vo);
   }
 
+  if (!viewOnly && S.schedule.length > 1){
+    var ob = document.createElement("button");
+    ob.type = "button";
+    ob.className = "btn ghost ord-open";
+    ob.id = "ord-open";
+    ob.textContent = "라운드 순서 바꾸기";
+    ob.addEventListener("click", openOrderSheet);
+    host.appendChild(ob);
+  }
+
   if (S.count >= 6 && S.games >= 4 && worst >= 4 && !streakFeasible(cfg)){
     var warn = document.createElement("p");
     warn.className = "hint";
@@ -2831,12 +2878,7 @@ function renderSchedule(){
     rd.matches.forEach(function(m){ if (filled(m)) dn++; });
     h.innerHTML = '<span class="round-no">'+(ri+1)+'라운드</span>'
       + '<span class="round-tag' + (dn === rd.matches.length ? " full" : "") + '">'
-      + dn + ' / ' + rd.matches.length + '</span>'
-      + (viewOnly ? "" :
-          '<button type="button" class="round-mv" data-mv="-1" data-r="' + ri + '"'
-          + (ri === 0 ? " disabled" : "") + ' aria-label="' + (ri+1) + '라운드를 앞으로">▲</button>'
-        + '<button type="button" class="round-mv" data-mv="1" data-r="' + ri + '"'
-          + (ri === S.schedule.length-1 ? " disabled" : "") + ' aria-label="' + (ri+1) + '라운드를 뒤로">▼</button>');
+      + dn + ' / ' + rd.matches.length + '</span>';
     sec.appendChild(h);
 
     rd.matches.forEach(function(m, mi){
@@ -2915,8 +2957,6 @@ $("#sched").addEventListener("input", function(e){
 $("#sched").addEventListener("click", function(e){
   var t = e.target;
   if (!t.closest) return;
-  var mv = t.closest(".round-mv");
-  if (mv){ if (!viewOnly && !mv.disabled) moveRound(+mv.dataset.r, +mv.dataset.mv); return; }
   if (t.classList && t.classList.contains("score")){
     if (viewOnly) toast("공유받은 결과입니다. 점수는 수정할 수 없습니다");
     return;
@@ -2928,20 +2968,173 @@ $("#sched").addEventListener("click", function(e){
   try { inp.select(); } catch(_){}
 });
 
-/* 라운드 순서 바꾸기 — 그 라운드의 대진·점수·휴식이 통째로 자리를 바꾼다 */
-function moveRound(ri, dir){
-  var to = ri + dir;
-  if (!S.schedule || to < 0 || to >= S.schedule.length) return;
-  var secs = $("#sched").querySelectorAll(".round");
-  var before = secs[ri] ? secs[ri].getBoundingClientRect().top : null;
-  var tmp = S.schedule[ri]; S.schedule[ri] = S.schedule[to]; S.schedule[to] = tmp;
-  S.savedAt = Date.now(); dirty = false;   // 점수 자동 저장과 같은 방식으로 즉시 저장
-  save(); render();
-  // 옮긴 라운드가 화면에서 같은 자리에 보이게 (연달아 눌러 여러 칸 옮길 수 있도록)
-  var after = $("#sched").querySelectorAll(".round")[to];
-  if (after && before !== null) window.scrollBy(0, after.getBoundingClientRect().top - before);
-  toast((ri+1) + "라운드 → " + (to+1) + "라운드로 옮김");
+/* ---------------- 라운드 순서 바꾸기 (시트) ----------------
+   한 줄짜리 라운드 목록에서 ≡ 손잡이를 끌거나 ▲▼ 로 옮긴다. 완료를 눌러야 반영된다.
+   draft 는 라운드 객체 참조 배열 — 열어둔 사이 다른 기기에서 대진이 바뀌면(객체가 새로 생김) 반영하지 않는다. */
+var Ord = { draft: null, base: null, worst0: 0 };
+
+function openOrderSheet(){
+  if (viewOnly || !S.schedule || S.schedule.length < 2) return;
+  Ord.draft = S.schedule.slice();
+  Ord.base  = S.schedule.slice();
+  Ord.worst0 = Math.max.apply(null, streaksOf(S.schedule, S.count));
+  renderOrderList();
+  $("#mOrder").hidden = false;
 }
+
+function renderOrderList(){
+  var list = $("#mOrder-list");
+  list.innerHTML = "";
+  Ord.draft.forEach(function(rd, k){
+    var li = document.createElement("li");
+    li.className = "ord-row";
+    var dn = 0;
+    rd.matches.forEach(function(m){ if (filled(m)) dn++; });
+    var games = rd.matches.map(function(m){
+      return esc(m.a.map(nameOf).join("·")) + '<span class="vs">vs</span>' + esc(m.b.map(nameOf).join("·"));
+    }).join(" &nbsp;/&nbsp; ");
+    li.innerHTML =
+      '<button type="button" class="ord-handle" aria-label="' + (k+1) + '라운드 끌어서 옮기기 (화살표 키로도 이동)">≡</button>' +
+      '<span class="ord-no">' + (k+1) + 'R</span>' +
+      '<span class="ord-body">' + games +
+        (dn === rd.matches.length ? '<span class="done">완료</span>' : "") +
+        (rd.byes.length ? '<span class="bye">휴식 ' + esc(rd.byes.map(nameOf).join(", ")) + '</span>' : "") +
+      '</span>' +
+      '<button type="button" class="ord-mv" data-mv="-1"' + (k === 0 ? " disabled" : "") + ' aria-label="' + (k+1) + '라운드를 앞으로">▲</button>' +
+      '<button type="button" class="ord-mv" data-mv="1"' + (k === Ord.draft.length-1 ? " disabled" : "") + ' aria-label="' + (k+1) + '라운드를 뒤로">▼</button>';
+    li.dataset.k = k;
+    list.appendChild(li);
+  });
+  renderOrderSummary();
+}
+
+// 지금 순서의 최장 연속 출전 — 처음보다 길어지면 붉게 알린다
+function renderOrderSummary(){
+  var mx = streaksOf(Ord.draft, S.count);
+  var worst = Math.max.apply(null, mx);
+  var who = [];
+  mx.forEach(function(v, i){ if (v === worst) who.push(nameOf(i)); });
+  var el = $("#mOrder-sum");
+  el.textContent = "최장 연속 " + worst + "경기"
+    + (worst >= 3 ? " · " + who.slice(0, 4).join(", ") + (who.length > 4 ? " 외 " + (who.length-4) + "명" : "") : "")
+    + (worst > Ord.worst0 ? " — 처음(" + Ord.worst0 + "경기)보다 길어졌습니다" : "");
+  el.className = "ord-sum" + (worst > Ord.worst0 ? " bad" : "");
+}
+
+function orderMove(k, to){
+  if (to < 0 || to >= Ord.draft.length || to === k) return;
+  var rd = Ord.draft.splice(k, 1)[0];
+  Ord.draft.splice(to, 0, rd);
+  renderOrderList();
+  // 옮긴 줄의 같은 버튼에 포커스를 남겨 연달아 누를 수 있게
+  var row = $("#mOrder-list").children[to];
+  return row;
+}
+
+$("#mOrder-list").addEventListener("click", function(e){
+  var b = e.target.closest && e.target.closest(".ord-mv");
+  if (!b || b.disabled) return;
+  var k = +b.closest(".ord-row").dataset.k, dir = +b.dataset.mv;
+  var row = orderMove(k, k + dir);
+  if (row){
+    var nb = row.querySelector('.ord-mv[data-mv="' + dir + '"]');
+    (nb && !nb.disabled ? nb : row.querySelector(".ord-handle")).focus();
+  }
+});
+// 손잡이에 포커스가 있으면 화살표 키로 옮긴다 (키보드 · 스크린리더 대체 조작)
+$("#mOrder-list").addEventListener("keydown", function(e){
+  if (!e.target.classList || !e.target.classList.contains("ord-handle")) return;
+  var dir = e.key === "ArrowUp" ? -1 : (e.key === "ArrowDown" ? 1 : 0);
+  if (!dir) return;
+  e.preventDefault();
+  var k = +e.target.closest(".ord-row").dataset.k;
+  var row = orderMove(k, k + dir);
+  if (row) row.querySelector(".ord-handle").focus();
+});
+
+/* 손잡이 드래그 — 터치·마우스 모두 직접 처리한다 (HTML5 drag 는 iOS 터치에서 동작하지 않는다) */
+(function(){
+  var list = $("#mOrder-list");
+  var row = null, startY = 0, lastY = 0, scrollT = null;
+  function pointY(e){ var t = e.touches && e.touches[0]; return t ? t.clientY : e.clientY; }
+  function start(e){
+    var h = e.target.closest && e.target.closest(".ord-handle");
+    if (!h) return;
+    row = h.closest(".ord-row");
+    startY = lastY = pointY(e);
+    row.classList.add("dragging");
+    if (e.cancelable) e.preventDefault();   // 스크롤·텍스트 선택 대신 드래그
+    d.addEventListener("touchmove", move, { passive:false });
+    d.addEventListener("touchend", end); d.addEventListener("touchcancel", end);
+    d.addEventListener("mousemove", move); d.addEventListener("mouseup", end);
+  }
+  function place(y){
+    // 옆 줄의 가운데를 넘으면 그 줄과 자리를 바꾸고, 바뀐 만큼 기준점을 옮겨 손가락 위치를 유지한다
+    var before = row.offsetTop, moved = false, nb, r;
+    while ((nb = row.nextElementSibling) && (r = nb.getBoundingClientRect(), y > r.top + r.height/2)){
+      list.insertBefore(nb, row); moved = true;
+    }
+    while (!moved && (nb = row.previousElementSibling) && (r = nb.getBoundingClientRect(), y < r.top + r.height/2)){
+      list.insertBefore(row, nb);
+    }
+    startY += row.offsetTop - before;
+    row.style.transform = "translateY(" + (y - startY) + "px)";
+  }
+  // 목록 위·아래 끝에 손가락이 있으면 목록을 스크롤한다 (라운드가 많을 때)
+  function edgeScroll(){
+    clearTimeout(scrollT);
+    if (!row) return;
+    var r = list.getBoundingClientRect(), dy = 0;
+    if (lastY < r.top + 40) dy = -8; else if (lastY > r.bottom - 40) dy = 8;
+    if (!dy) return;
+    var s0 = list.scrollTop;
+    list.scrollTop += dy;
+    if (list.scrollTop !== s0){ startY -= list.scrollTop - s0; place(lastY); }
+    scrollT = setTimeout(edgeScroll, 16);
+  }
+  function move(e){
+    if (!row) return;
+    if (e.cancelable) e.preventDefault();
+    lastY = pointY(e);
+    place(lastY);
+    edgeScroll();
+  }
+  function end(){
+    if (!row) return;
+    clearTimeout(scrollT);
+    row.classList.remove("dragging");
+    row.style.transform = "";
+    var focusK = Array.prototype.indexOf.call(list.children, row);
+    // DOM 순서 → draft
+    var next = [];
+    Array.prototype.forEach.call(list.children, function(li){ next.push(Ord.draft[+li.dataset.k]); });
+    Ord.draft = next;
+    row = null;
+    d.removeEventListener("touchmove", move, { passive:false });
+    d.removeEventListener("touchend", end); d.removeEventListener("touchcancel", end);
+    d.removeEventListener("mousemove", move); d.removeEventListener("mouseup", end);
+    renderOrderList();
+    var h = list.children[focusK] && list.children[focusK].querySelector(".ord-handle");
+    if (h) h.focus();
+  }
+  list.addEventListener("touchstart", start, { passive:false });
+  list.addEventListener("mousedown", start);
+})();
+
+$("#mOrder-done").addEventListener("click", function(){
+  var cur = S.schedule || [], draft = Ord.draft, base = Ord.base;
+  Ord.draft = Ord.base = null;
+  $("#mOrder").hidden = true;
+  if (!draft) return;
+  var same = cur.length === base.length && cur.every(function(rd, i){ return rd === base[i]; });
+  if (!same){ toast("다른 기기에서 대진이 바뀌어 순서 변경을 적용하지 않았습니다"); return; }
+  var changed = draft.some(function(rd, i){ return rd !== cur[i]; });
+  if (!changed) return;
+  S.schedule = draft;
+  S.savedAt = Date.now(); dirty = false;   // 점수 자동 저장과 같은 방식으로 즉시 저장 (코트면 동기화)
+  save(); render();
+  toast("라운드 순서를 바꿨습니다");
+});
 
 /* 이미 값이 있는 칸은 전체 선택 — 백스페이스 없이 덮어쓰게 (6에 7을 치면 67이 되던 문제) */
 $("#sched").addEventListener("focusin", function(e){

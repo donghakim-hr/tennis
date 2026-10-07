@@ -191,7 +191,7 @@ const isClosed = (ctx, key) => ctx.d.querySelector('[data-fold="' + key + '"]').
   R.section("혼복 남4·여2 연속 출전 · 라운드 순서 바꾸기");
   {
     const ctx = boot();
-    const { w, $, $$ } = ctx;
+    const { w, d, $, $$ } = ctx;
     await sleep(150);
     pickMode(ctx, "mixed");
     let guard = 30;
@@ -226,22 +226,71 @@ const isClosed = (ctx, key) => ctx.d.querySelector('[data-fold="' + key + '"]').
     }
 
     click(w, $("#make"));
-    const mv = (ri, dir) => $$("#sched .round")[ri].querySelector('.round-mv[data-mv="' + dir + '"]');
-    R.ok(mv(0, -1).disabled && !mv(0, 1).disabled, "1라운드는 ▲ 비활성 · ▼ 활성");
-    const last = $$("#sched .round").length - 1;
-    R.ok(mv(last, 1).disabled, "마지막 라운드는 ▼ 비활성");
+    R.ok(!$$("#sched .round-head button").length, "라운드 제목에는 버튼이 없다 (경기 중 오조작 방지)");
     const sc = $$("#sched .round")[0].querySelectorAll(".score");
     sc[0].value = "6"; fire(w, sc[0], "input");
     sc[1].value = "2"; fire(w, sc[1], "input");
-    const r0 = JSON.stringify(readSchedule(ctx)[0]), r1 = JSON.stringify(readSchedule(ctx)[1]);
-    click(w, mv(0, 1));
-    const after = readSchedule(ctx);
-    R.ok(JSON.stringify(after[0]) === r1 && JSON.stringify(after[1]) === r0, "▼로 1·2라운드 자리가 바뀐다");
+    const before = readSchedule(ctx).map(r => JSON.stringify(r));
+    const nR = before.length;
+
+    click(w, $("#ord-open"));
+    R.ok(!$("#mOrder").hidden, "'라운드 순서 바꾸기'로 시트가 열린다");
+    const rows = () => $$("#mOrder-list .ord-row");
+    R.ok(rows().length === nR, "시트에 라운드가 한 줄씩: " + rows().length);
+    R.ok(/완료/.test(rows()[0].textContent) && /휴식/.test(rows()[0].textContent), "줄에 완료 표시·휴식자");
+    const mvb = (k, dir) => rows()[k].querySelector('.ord-mv[data-mv="' + dir + '"]');
+    R.ok(mvb(0, -1).disabled && mvb(nR - 1, 1).disabled, "첫 줄 ▲ · 끝 줄 ▼ 비활성");
+    R.ok(/최장 연속 \d경기/.test($("#mOrder-sum").textContent), "최장 연속 요약: " + $("#mOrder-sum").textContent);
+
+    click(w, mvb(0, 1));
+    R.ok(rows()[0].textContent.indexOf("완료") < 0 && rows()[1].textContent.indexOf("완료") >= 0
+      && rows()[1].querySelector(".ord-no").textContent === "2R", "▼로 시트 안에서 자리가 바뀌고 번호가 다시 매겨진다");
+    R.ok(JSON.stringify(readSchedule(ctx)[0]) === before[0], "완료 전에는 대진표가 그대로");
+    click(w, $("#mOrder [data-close].btn"));
+    R.ok($("#mOrder").hidden && JSON.stringify(readSchedule(ctx)[0]) === before[0], "취소하면 반영되지 않는다");
+
+    // 손잡이 드래그 — jsdom 은 레이아웃이 없어 줄 위치를 순서×60px 로 흉내 낸다
+    click(w, $("#ord-open"));
+    const H = 60;
+    const idxOf = el => Array.prototype.indexOf.call(el.parentNode.children, el);
+    const origRect = w.Element.prototype.getBoundingClientRect;
+    w.Element.prototype.getBoundingClientRect = function(){
+      if (this.classList.contains("ord-row")) { const t = idxOf(this) * H; return { top:t, bottom:t + H - 6, height:H - 6, left:0, right:300, width:300 }; }
+      if (this.id === "mOrder-list") return { top:0, bottom:2000, height:2000, left:0, right:300, width:300 };
+      return origRect.call(this);
+    };
+    Object.defineProperty(w.HTMLElement.prototype, "offsetTop", { configurable:true,
+      get(){ return this.classList && this.classList.contains("ord-row") ? idxOf(this) * H : 0; } });
+    const mouse = (el, type, y) => el.dispatchEvent(new w.MouseEvent(type, { bubbles:true, cancelable:true, clientY:y }));
+    const handle = rows()[0].querySelector(".ord-handle");
+    mouse(handle, "mousedown", 20);
+    R.ok(rows()[0].classList.contains("dragging"), "손잡이를 누르면 끌기 시작");
+    mouse(d, "mousemove", 20 + H * 2 + 10);
+    R.ok(idxOf($("#mOrder-list .dragging")) === 2, "끄는 동안 다른 줄이 비켜난다");
+    mouse(d, "mouseup", 20 + H * 2 + 10);
+    R.ok(!$("#mOrder-list .dragging"), "놓으면 끌기 끝");
+    R.ok(rows()[2].textContent.indexOf("완료") >= 0 && rows()[2].querySelector(".ord-no").textContent === "3R",
+      "1라운드를 3번째로 끌어 놓았다 (번호 다시 매김)");
+    // 손잡이에서 화살표 키
+    const h3 = rows()[2].querySelector(".ord-handle");
+    h3.focus();
+    h3.dispatchEvent(new w.KeyboardEvent("keydown", { key:"ArrowUp", bubbles:true, cancelable:true }));
+    R.ok(rows()[1].textContent.indexOf("완료") >= 0 && d.activeElement.closest(".ord-row") === rows()[1],
+      "손잡이에서 ↑ 키로도 옮기고 포커스가 따라간다");
+    w.Element.prototype.getBoundingClientRect = origRect;
+    delete w.HTMLElement.prototype.offsetTop;
+
+    click(w, $("#mOrder-done"));
+    const after = readSchedule(ctx).map(r => JSON.stringify(r));
+    R.ok($("#mOrder").hidden, "완료하면 시트가 닫힌다");
+    R.ok(after[1] === before[0] && after[0] === before[1] && after.slice(2).join() === before.slice(2).join(),
+      "완료하면 대진표에 반영 (1·2라운드 교환)");
     const moved = $$("#sched .round")[1].querySelectorAll(".score");
     R.ok(moved[0].value === "6" && moved[1].value === "2", "점수가 라운드와 함께 옮겨진다");
-    click(w, mv(1, -1));
-    R.ok(JSON.stringify(readSchedule(ctx)[0]) === r0, "▲로 되돌릴 수 있다");
-    R.ok(/"sa":6/.test(w.localStorage.getItem("tennis:sessions") || ""), "순서 변경이 바로 저장된다");
+    R.ok($$("#sched .round-no")[1].textContent === "2라운드", "라운드 번호는 새 순서대로");
+    const saved = JSON.parse(w.localStorage.getItem("tennis:sessions") || "{}");
+    const cur = saved.sessions && saved.sessions[saved.current];
+    R.ok(cur && cur.schedule[1].matches[0].sa === 6, "순서 변경이 바로 저장된다");
     R.ok(ctx.errs.length === 0, "런타임 오류 없음" + (ctx.errs.length ? ": " + ctx.errs[0] : ""));
   }
 

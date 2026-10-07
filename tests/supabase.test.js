@@ -261,6 +261,32 @@ async function main(){
       assert(rpcCalls.slice(before).every(x => x.fn !== "room_push_state"), "불필요한 재전송");
     });
 
+    // 라운드 순서 바꾸기 → 코트에 동기화
+    const pushes0 = rpcCalls.filter(x => x.fn === "room_push_state").length;
+    click(w, $("#ord-open"));
+    click(w, $$("#mOrder-list .ord-row")[0].querySelector('.ord-mv[data-mv="1"]'));
+    click(w, $("#mOrder-done"));
+    await sleep(30);
+    t("라운드 순서 변경이 코트에 바로 동기화된다", () => {
+      const ps = rpcCalls.filter(x => x.fn === "room_push_state");
+      assert(ps.length === pushes0 + 1, "push " + (ps.length - pushes0));
+      const st = ps[ps.length - 1].args.p_state;
+      assert(st.schedule[1].matches[0].sa === 6 && st.schedule[1].matches[0].sb === 4, "1라운드가 2번째로");
+    });
+    // 시트를 열어 둔 사이 다른 기기가 대진을 바꾸면 내 순서 변경은 적용하지 않는다
+    click(w, $("#ord-open"));
+    click(w, $$("#mOrder-list .ord-row")[0].querySelector('.ord-mv[data-mv="1"]'));
+    const r3 = JSON.parse(JSON.stringify(last("room_push_state").args.p_state)); r3.names[1] = "원격";
+    upd({ new: { last_writer: "other", state: r3, updated_at:"2026-10-07T00:00:30Z", is_open:true } });
+    const pushes1 = rpcCalls.filter(x => x.fn === "room_push_state").length;
+    click(w, $("#mOrder-done"));
+    await sleep(30);
+    t("열어 둔 사이 원격 변경이 오면 순서 변경을 버리고 원격 상태를 지킨다", () => {
+      assert(rpcCalls.filter(x => x.fn === "room_push_state").length === pushes1, "push 발생");
+      assert(/원격/.test($("#sched").textContent), "원격 이름 유지");
+      assert($$("#sched .round")[1].querySelectorAll(".score")[0].value === "6", "원격 순서 유지");
+    });
+
     click(w, $("#btn-room"));
     t("방주에게 코트 종료 버튼", () => assert($("#mRoom-close") && !$("#mRoom-close").hidden, "mRoom-close"));
     click(w, $("#mRoom-close"));
